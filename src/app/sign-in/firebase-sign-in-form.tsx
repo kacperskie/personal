@@ -15,8 +15,7 @@ export function FirebaseSignInForm({ firebaseConfigured }: { firebaseConfigured:
     return (
       <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
         <p className="text-sm text-ink/70">
-          Firebase is selected but not configured. Add Firebase web app values to enable
-          email/password sign-in, or switch to mock backend mode for local development.
+          Firebase sign-in is not fully configured. Check Netlify environment variables.
         </p>
       </div>
     );

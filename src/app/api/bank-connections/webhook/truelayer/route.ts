@@ -16,6 +16,9 @@ import {
   recordServiceProviderSyncEvent,
 } from "@/lib/repositories/service-finance-repository";
 
+// Uses Firebase Admin/Firestore or session verification; force the Node.js runtime.
+export const runtime = "nodejs";
+
 function safeWebhookError(code: string, message: string, status: number) {
   return NextResponse.json({ error: { code, message } }, { status });
 }

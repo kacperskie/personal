@@ -18,6 +18,9 @@ import {
   unauthenticatedResponse,
 } from "@/lib/server/route-auth";
 
+// Uses Firebase Admin/Firestore or session verification; force the Node.js runtime.
+export const runtime = "nodejs";
+
 export async function POST(
   _request: Request,
   context: { params: Promise<{ connectionId: string }> },

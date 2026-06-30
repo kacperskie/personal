@@ -6,7 +6,7 @@ import { firebaseSessionCookieName } from "@/lib/firebase/constants";
 const sessionMaxAgeSeconds = 60 * 60 * 24 * 5;
 
 export async function createFirebaseSessionCookie(idToken: string) {
-  const auth = createFirebaseAdminAuth();
+  const auth = await createFirebaseAdminAuth();
 
   if (!auth) {
     return null;
@@ -18,7 +18,7 @@ export async function createFirebaseSessionCookie(idToken: string) {
 }
 
 export async function getFirebaseSessionUser() {
-  const auth = createFirebaseAdminAuth();
+  const auth = await createFirebaseAdminAuth();
 
   if (!auth) {
     return null;

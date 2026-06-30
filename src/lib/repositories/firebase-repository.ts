@@ -92,7 +92,7 @@ type CollectionTypeMap = {
 };
 
 export type FirebaseAuthenticatedContext = {
-  db: NonNullable<ReturnType<typeof createFirebaseAdminFirestore>>;
+  db: NonNullable<Awaited<ReturnType<typeof createFirebaseAdminFirestore>>>;
   userId: string;
 };
 
@@ -117,7 +117,7 @@ function collectionPath(userId: string, collectionName: string) {
 }
 
 export async function getFirebaseAuthenticatedContext(): Promise<FirebaseAuthenticatedContext | null> {
-  const db = createFirebaseAdminFirestore();
+  const db = await createFirebaseAdminFirestore();
 
   if (!db) {
     return null;
@@ -220,7 +220,7 @@ export async function ensureFirebaseUserProfile(input: {
   email?: string | null;
   displayName?: string | null;
 }): Promise<UserProfile | null> {
-  const db = createFirebaseAdminFirestore();
+  const db = await createFirebaseAdminFirestore();
 
   if (!db) {
     return null;

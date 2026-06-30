@@ -7,6 +7,10 @@ import {
 import { createFirebaseAdminAuth } from "@/lib/firebase/admin";
 import { ensureFirebaseUserProfile } from "@/lib/repositories/firebase-repository";
 
+// Firebase Admin (firebase-admin/auth) requires the Node.js runtime; it cannot
+// run in the Edge runtime and must not be bundled into middleware.
+export const runtime = "nodejs";
+
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as { idToken?: unknown } | null;
   const idToken = typeof body?.idToken === "string" ? body.idToken : null;
@@ -23,7 +27,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const auth = createFirebaseAdminAuth();
+  const auth = await createFirebaseAdminAuth();
   const sessionCookie = await createFirebaseSessionCookie(idToken);
 
   if (!sessionCookie || !auth) {

@@ -11,6 +11,9 @@ import {
   recordServiceAuditEvent,
 } from "@/lib/repositories/service-finance-repository";
 
+// Uses Firebase Admin/Firestore or session verification; force the Node.js runtime.
+export const runtime = "nodejs";
+
 const minimumSyncIntervalMs = 30 * 60 * 1000;
 
 function requestCronSecret(request: Request) {

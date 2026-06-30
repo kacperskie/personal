@@ -12,6 +12,9 @@ import {
   unauthenticatedResponse,
 } from "@/lib/server/route-auth";
 
+// Uses Firebase Admin/Firestore or session verification; force the Node.js runtime.
+export const runtime = "nodejs";
+
 function createTestNotification(userId: string): AppNotification {
   const now = new Date().toISOString();
 

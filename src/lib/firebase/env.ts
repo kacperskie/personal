@@ -15,6 +15,48 @@ export type FirebaseAdminEnv = {
   privateKey: string;
 };
 
+/**
+ * Normalise a Firebase Admin private key supplied via an environment variable.
+ * Netlify (and many CI systems) store the multi-line PEM as a single line with
+ * escaped `\n` sequences, and the value is sometimes wrapped in surrounding
+ * quotes. This strips a single layer of surrounding single/double quotes and
+ * converts escaped newlines to real newlines. The key is never logged.
+ */
+export function normaliseFirebasePrivateKey(
+  rawKey: string | undefined,
+): string | undefined {
+  if (!rawKey) {
+    return undefined;
+  }
+
+  let key = rawKey.trim();
+
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1);
+  }
+
+  return key.replace(/\\n/g, "\n");
+}
+
+/**
+ * True when a private key value is present but does not look like a PEM block.
+ * Used by readiness to report a malformed key without initialising Admin.
+ */
+export function isFirebasePrivateKeyMalformed(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const key = normaliseFirebasePrivateKey(env.FIREBASE_PRIVATE_KEY);
+
+  if (!key) {
+    return false;
+  }
+
+  return !key.includes("BEGIN PRIVATE KEY");
+}
+
 export function getFirebaseBrowserEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): FirebaseBrowserEnv | null {
@@ -42,7 +84,7 @@ export function getFirebaseAdminEnv(
 ): FirebaseAdminEnv | null {
   const projectId = env.FIREBASE_PROJECT_ID ?? env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
   const clientEmail = env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const privateKey = normaliseFirebasePrivateKey(env.FIREBASE_PRIVATE_KEY);
 
   if (!projectId || !clientEmail || !privateKey) {
     return null;

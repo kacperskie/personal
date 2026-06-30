@@ -6,6 +6,7 @@ import {
 } from "@/lib/bank-providers/provider-config";
 import { getClientWebPushConfig } from "@/lib/notifications/web-push";
 import { validateDeploymentEnvironment } from "@/lib/deployment/env";
+import { isFirebasePrivateKeyMalformed } from "@/lib/firebase/env";
 
 export type ReadinessStatus = "pass" | "warning" | "fail";
 
@@ -57,6 +58,7 @@ export function buildSystemReadinessReport(
     validation.publicClientSafe.firebaseAppIdConfigured;
   const firebaseSelected = validation.backendProvider === "firebase";
   const mockSelected = validation.backendProvider === "mock";
+  const firebasePrivateKeyMalformed = isFirebasePrivateKeyMalformed(env);
   const trueLayerSelected = env.OPEN_BANKING_PROVIDER === "truelayer";
   const selectedProvider = getOpenBankingProvider(env);
   const selectedProviderConfigured =
@@ -107,13 +109,19 @@ export function buildSystemReadinessReport(
       "firebase_admin",
       "Firebase Admin server setup",
       firebaseSelected
-        ? statusFromConfigured(validation.serverOnly.firebaseAdminConfigured)
+        ? firebasePrivateKeyMalformed
+          ? "warning"
+          : statusFromConfigured(validation.serverOnly.firebaseAdminConfigured)
         : "pass",
-      validation.serverOnly.firebaseAdminConfigured
-        ? "Firebase Admin credentials are configured server-side."
-        : "Missing; Firebase session verification and server Firestore writes are unavailable.",
+      firebasePrivateKeyMalformed
+        ? "A FIREBASE_PRIVATE_KEY is set but does not look like a PEM key; check for missing newlines or stray quotes."
+        : validation.serverOnly.firebaseAdminConfigured
+          ? "Firebase Admin credentials are configured server-side."
+          : "Missing; Firebase session verification and server Firestore writes are unavailable.",
       firebaseSelected
-        ? "Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY server-side."
+        ? firebasePrivateKeyMalformed
+          ? "Re-paste FIREBASE_PRIVATE_KEY with escaped \\n newlines and no surrounding quotes."
+          : "Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY server-side."
         : null,
     ),
     check(

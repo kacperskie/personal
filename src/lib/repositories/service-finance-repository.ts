@@ -89,7 +89,7 @@ function firebaseUserCollection(userId: string, collectionName: string) {
 
 async function createFirebaseServiceFirestore() {
   const { createFirebaseAdminFirestore } = await import("@/lib/firebase/admin");
-  return createFirebaseAdminFirestore();
+  return await createFirebaseAdminFirestore();
 }
 
 async function getFirebaseUserCollection<T>(

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { runScheduledNotificationGeneration } from "@/lib/notifications/scheduled-alerts";
 
+// Uses Firebase Admin/Firestore or session verification; force the Node.js runtime.
+export const runtime = "nodejs";
+
 function requestCronSecret(request: Request) {
   const authorization = request.headers.get("authorization") ?? "";
 
