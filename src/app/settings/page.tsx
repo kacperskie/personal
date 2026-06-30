@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { Cable, ShieldCheck, ToggleLeft } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { SignOutButton } from "@/components/sign-out-button";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 
 export default function SettingsPage() {
+  const supabaseConfigured = isSupabaseConfigured();
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -31,9 +35,11 @@ export default function SettingsPage() {
           <ShieldCheck className="h-5 w-5 text-teal" aria-hidden="true" />
           <h2 className="mt-4 text-base font-semibold text-ink">Data mode</h2>
           <p className="mt-2 text-sm leading-6 text-ink/70">
-            This build uses mock seed data only. No bank credentials, real provider
-            connections, access tokens, or real financial records are stored.
+            {supabaseConfigured
+              ? "Supabase persistence is configured. Real provider credentials and access tokens are still disabled."
+              : "Supabase is not configured, so this build is using local mock seed data only."}
           </p>
+          {supabaseConfigured ? <div className="mt-4"><SignOutButton /></div> : null}
         </article>
 
         <article className="rounded-lg border border-line bg-white p-5 shadow-panel">

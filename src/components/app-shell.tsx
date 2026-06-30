@@ -89,10 +89,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mt-6 hidden rounded-lg border border-line bg-paper p-4 lg:block">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-moss">
             <CalendarClock className="h-4 w-4" aria-hidden="true" />
-            Phase 3
+            Phase 4
           </div>
           <p className="mt-2 text-sm leading-5 text-ink/65">
-            Mock Open Banking foundation with account purpose assignment. Real APIs are off.
+            Supabase-ready persistence with mock provider data. Real banking APIs are off.
           </p>
         </div>
       </aside>

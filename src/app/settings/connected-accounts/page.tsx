@@ -1,13 +1,12 @@
 import { Cable, CheckCircle2, CircleAlert, CircleDashed } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { StatusPill } from "@/components/status-pill";
-import {
-  bankConnectionsWithDisplayStatus,
-  connectedAccountSummary,
-  connectionLifecycleStates,
-} from "@/lib/mock-data";
-import { formatDateShort } from "@/lib/format";
 import type { ConnectionLifecycleStatus } from "@/lib/domain";
+import { formatDateShort } from "@/lib/format";
+import { getConnectionLifecycleStatus } from "@/lib/finance";
+import { getBankConnections } from "@/lib/repositories/finance-repository";
+
+export const dynamic = "force-dynamic";
 
 const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warning" | "risk"> = {
   not_connected: "neutral",
@@ -19,11 +18,38 @@ const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warnin
   disconnected: "neutral",
 };
 
+const connectionLifecycleStates: ConnectionLifecycleStatus[] = [
+  "not_connected",
+  "connecting",
+  "connected",
+  "needs_reconsent",
+  "syncing",
+  "sync_failed",
+  "disconnected",
+];
+
 function labelStatus(status: string) {
   return status.replaceAll("_", " ");
 }
 
-export default function ConnectedAccountsPage() {
+export default async function ConnectedAccountsPage() {
+  const bankConnections = await getBankConnections();
+  const asOfDate = new Date().toISOString().slice(0, 10);
+  const connectionsWithDisplayStatus = bankConnections.map((connection) => ({
+    ...connection,
+    displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
+  }));
+  const connectedInstitutions = connectionsWithDisplayStatus.filter(
+    (connection) =>
+      connection.displayStatus === "connected" || connection.displayStatus === "syncing",
+  ).length;
+  const needsReconsent = connectionsWithDisplayStatus.filter(
+    (connection) => connection.displayStatus === "needs_reconsent",
+  ).length;
+  const syncFailed = connectionsWithDisplayStatus.filter(
+    (connection) => connection.displayStatus === "sync_failed",
+  ).length;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -37,22 +63,18 @@ export default function ConnectedAccountsPage() {
           <CheckCircle2 className="h-5 w-5 text-moss" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Active or syncing</p>
           <p className="mt-1 text-2xl font-semibold text-ink">
-            {connectedAccountSummary.connectedInstitutions}
+            {connectedInstitutions}
           </p>
         </div>
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <CircleDashed className="h-5 w-5 text-saffron" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Needs re-consent</p>
-          <p className="mt-1 text-2xl font-semibold text-ink">
-            {connectedAccountSummary.needsReconsent}
-          </p>
+          <p className="mt-1 text-2xl font-semibold text-ink">{needsReconsent}</p>
         </div>
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <CircleAlert className="h-5 w-5 text-berry" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Sync failed</p>
-          <p className="mt-1 text-2xl font-semibold text-ink">
-            {connectedAccountSummary.syncFailed}
-          </p>
+          <p className="mt-1 text-2xl font-semibold text-ink">{syncFailed}</p>
         </div>
       </section>
 
@@ -65,7 +87,13 @@ export default function ConnectedAccountsPage() {
           <Cable className="h-5 w-5 text-teal" aria-hidden="true" />
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
-          {bankConnectionsWithDisplayStatus.map((connection) => (
+          {connectionsWithDisplayStatus.length === 0 ? (
+            <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/60">
+              No provider connections are available yet. Real connection setup remains disabled.
+            </div>
+          ) : null}
+
+          {connectionsWithDisplayStatus.map((connection) => (
             <article key={connection.id} className="rounded-lg border border-line bg-paper p-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
