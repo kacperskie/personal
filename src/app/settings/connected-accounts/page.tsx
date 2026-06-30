@@ -56,7 +56,7 @@ export default async function ConnectedAccountsPage() {
       <PageHeader
         eyebrow="Open Banking foundation"
         title="Connected Accounts"
-        description="Moneyhub sandbox-ready foundation with provider-agnostic routes, mock fallback, and server-only token handling."
+        description="Moneyhub and TrueLayer sandbox adapter options with provider-agnostic routes, mock fallback, and server-only token handling."
       />
 
       <section className="grid gap-4 xl:grid-cols-3">

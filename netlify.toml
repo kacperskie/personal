@@ -1,0 +1,23 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  # Configure real values in the Netlify UI, not in this file.
+  # Required for basic staging:
+  # NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  # SUPABASE_SERVICE_ROLE_KEY, APP_BASE_URL, CRON_SECRET,
+  # MOCK_DATA_FALLBACK_ENABLED.
+  # Optional integrations:
+  # OPENAI_API_KEY, WEB_PUSH_VAPID_PUBLIC_KEY,
+  # WEB_PUSH_VAPID_PRIVATE_KEY, WEB_PUSH_SUBJECT,
+  # TRUELAYER_CLIENT_ID, TRUELAYER_CLIENT_SECRET,
+  # MONEYHUB_CLIENT_ID, MONEYHUB_CLIENT_SECRET.
+  NODE_VERSION = "22.13.0"

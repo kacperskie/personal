@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  getOpenBankingProvider,
+  getTrueLayerSandboxReadiness,
+} from "@/lib/bank-providers/provider-config";
 import { getClientWebPushConfig } from "@/lib/notifications/web-push";
 import { validateDeploymentEnvironment } from "@/lib/deployment/env";
 
@@ -16,6 +20,7 @@ export type ReadinessCheck = {
 export type SystemReadinessReport = {
   generatedAt: string;
   environment: string;
+  deploymentPlatform: string;
   overallStatus: ReadinessStatus;
   checks: ReadinessCheck[];
 };
@@ -43,8 +48,32 @@ export function buildSystemReadinessReport(
 ): SystemReadinessReport {
   const validation = validateDeploymentEnvironment(env);
   const webPush = getClientWebPushConfig(env);
+  const truelayerReadiness = getTrueLayerSandboxReadiness(env);
   const flags = validation.featureFlags;
+  const trueLayerSelected = env.OPEN_BANKING_PROVIDER === "truelayer";
+  const selectedProvider = getOpenBankingProvider(env);
+  const selectedProviderConfigured =
+    selectedProvider === "moneyhub"
+      ? validation.serverOnly.moneyhubSandboxConfigured
+      : selectedProvider === "truelayer"
+        ? validation.serverOnly.truelayerSandboxConfigured
+        : selectedProvider === "mock";
   const checks: ReadinessCheck[] = [
+    check(
+      "deployment_platform",
+      "Deployment platform",
+      validation.deploymentPlatform === "unknown" ? "warning" : "pass",
+      validation.deploymentPlatform === "netlify"
+        ? `Netlify staging detected${validation.netlify.context ? ` for ${validation.netlify.context}` : ""}.`
+        : validation.deploymentPlatform === "vercel"
+          ? "Vercel deployment detected. Vercel remains supported as a secondary option."
+          : validation.deploymentPlatform === "local"
+            ? "Local development environment detected."
+            : "Deployment platform could not be identified.",
+      validation.deploymentPlatform === "unknown"
+        ? "Set Netlify or Vercel deployment environment variables."
+        : null,
+    ),
     check(
       "supabase_url",
       "Supabase URL",
@@ -96,6 +125,48 @@ export function buildSystemReadinessReport(
         : null,
     ),
     check(
+      "open_banking_provider",
+      "Open Banking provider",
+      selectedProviderConfigured ||
+        (!flags.openBankingEnabled &&
+          !flags.moneyhubSandboxEnabled &&
+          !flags.truelayerSandboxEnabled)
+        ? "pass"
+        : "fail",
+      selectedProvider === "mock"
+        ? "Mock provider selected; no banking APIs are called."
+        : selectedProviderConfigured
+          ? `${selectedProvider} sandbox configuration appears present.`
+          : `${selectedProvider} sandbox is selected but not fully configured.`,
+      selectedProviderConfigured
+        ? null
+        : "Set the selected provider sandbox variables or switch to mock.",
+    ),
+    check(
+      "truelayer",
+      "TrueLayer sandbox",
+      trueLayerSelected
+        ? statusFromConfigured(validation.serverOnly.truelayerSandboxConfigured)
+        : "pass",
+      validation.serverOnly.truelayerSandboxConfigured
+        ? "Sandbox configuration appears present."
+        : "Not fully configured; mock provider fallback remains available.",
+      trueLayerSelected
+        ? "Set TrueLayer sandbox client, redirect, scope, and webhook configuration."
+        : null,
+    ),
+    check(
+      "truelayer_webhook",
+      "TrueLayer webhook secret",
+      trueLayerSelected
+        ? statusFromConfigured(truelayerReadiness.webhookSecretConfigured)
+        : "pass",
+      truelayerReadiness.webhookSecretConfigured
+        ? "Configured server-side for sandbox webhook validation."
+        : "Missing; TrueLayer webhook route rejects non-stub signatures.",
+      trueLayerSelected ? "Set the TrueLayer webhook secret server-side." : null,
+    ),
+    check(
       "web_push",
       "Web Push VAPID keys",
       statusFromConfigured(
@@ -138,13 +209,17 @@ export function buildSystemReadinessReport(
       "webhook_urls",
       "Webhook URLs",
       statusFromConfigured(
-        Boolean(validation.appBaseUrl && validation.serverOnly.moneyhubSandboxConfigured),
+        Boolean(
+          validation.appBaseUrl &&
+            (validation.serverOnly.moneyhubSandboxConfigured ||
+              validation.serverOnly.truelayerSandboxConfigured),
+        ),
         true,
       ),
       validation.appBaseUrl
-        ? "Moneyhub webhook endpoint is route-backed; provider portal setup still required."
+        ? "Moneyhub and TrueLayer webhook endpoints are route-backed; provider portal setup still required."
         : "Webhook URL cannot be formed until base URL is configured.",
-      "Configure the Moneyhub webhook endpoint in the sandbox provider portal.",
+      "Configure provider webhook endpoints in the sandbox provider portal.",
     ),
     check(
       "scheduled_routes",
@@ -153,6 +228,23 @@ export function buildSystemReadinessReport(
       "Scheduled notification and bank sync routes require the cron secret.",
       validation.serverOnly.cronSecretConfigured ? null : "Set the cron secret before enabling cron.",
     ),
+    check(
+      "scheduled_job_support",
+      "Scheduled job support",
+      validation.deploymentPlatform === "netlify" ||
+        validation.deploymentPlatform === "vercel" ||
+        validation.serverOnly.cronSecretConfigured
+        ? "pass"
+        : "warning",
+      validation.deploymentPlatform === "netlify"
+        ? "Netlify scheduled function wrappers are expected to call protected API routes."
+        : validation.deploymentPlatform === "vercel"
+          ? "Vercel Cron remains supported through vercel.json."
+          : "HTTP scheduled routes are available for local/manual cron testing.",
+      validation.serverOnly.cronSecretConfigured
+        ? null
+        : "Set CRON_SECRET before enabling scheduled jobs.",
+    ),
   ];
   const hasFail = checks.some((item) => item.status === "fail");
   const hasWarning = checks.some((item) => item.status === "warning");
@@ -160,6 +252,7 @@ export function buildSystemReadinessReport(
   return {
     generatedAt: new Date().toISOString(),
     environment: validation.deploymentEnvironment,
+    deploymentPlatform: validation.deploymentPlatform,
     overallStatus: hasFail ? "fail" : hasWarning ? "warning" : "pass",
     checks,
   };
@@ -171,6 +264,8 @@ export function assertNoSecretValuesInReadinessReport(report: SystemReadinessRep
     process.env.SUPABASE_SERVICE_ROLE_KEY,
     process.env.OPENAI_API_KEY,
     process.env.MONEYHUB_CLIENT_SECRET,
+    process.env.TRUELAYER_CLIENT_SECRET,
+    process.env.TRUELAYER_WEBHOOK_SECRET,
     process.env.WEB_PUSH_VAPID_PRIVATE_KEY,
     process.env.CRON_SECRET,
   ].filter(Boolean) as string[];

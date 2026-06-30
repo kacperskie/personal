@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 11 prepares the app for secure staging deployment with readiness checks, typed environment validation, deployment runbooks, smoke tests, security checklists, and safe observability.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 12B makes Netlify the primary staging deployment target while preserving Vercel as a secondary option.
 
 ## Current Phase
 
-Phase 11: secure staging readiness.
+Phase 12B: Netlify-first staging deployment.
 
 Implemented locally:
 
@@ -17,10 +17,13 @@ Implemented locally:
 - iPhone PWA metadata, `manifest.webmanifest`, app icon placeholders, Apple touch icon placeholder, and service worker registration.
 - Offline fallback page and service worker handlers for fetch, push placeholders, and notification clicks.
 - Moneyhub provider implementation in `src/lib/bank-providers/moneyhub-provider.ts` using the official Moneyhub API client behind the provider adapter.
+- TrueLayer provider implementation in `src/lib/bank-providers/truelayer-provider.ts` behind the same provider adapter interface.
 - Provider config, safe errors, payload mappers, provider notifications, and sync workflow helpers under `src/lib/bank-providers`.
 - OAuth/consent route handlers for start, callback, sync, and revoke.
-- Moneyhub sandbox readiness checker and Settings / Connected Accounts readiness card.
+- Moneyhub and TrueLayer sandbox readiness checkers and Settings / Connected Accounts readiness cards.
+- Provider comparison UI for mock, Moneyhub, and TrueLayer capability validation.
 - Event-driven Moneyhub webhook handling at `POST /api/bank-connections/webhook/moneyhub` for transaction and sync events.
+- TrueLayer webhook placeholder at `POST /api/bank-connections/webhook/truelayer` with safe signature checks, event parsing, audit events, and sync job enqueueing.
 - Idempotent provider webhook event tracking with duplicate webhook no-op handling.
 - Lightweight sync queue abstraction with Supabase persistence when configured and in-memory mock fallback otherwise.
 - Scheduled fallback sync route at `POST /api/bank-connections/scheduled-sync`, protected by `CRON_SECRET`.
@@ -42,12 +45,14 @@ Implemented locally:
 - Scheduled alert route at `GET /api/notifications/scheduled`, protected by `CRON_SECRET`.
 - Service worker push handling for privacy-safe notification text and safe `/notifications` deep-link fallback.
 - Settings notification UX for iPhone Home Screen PWA guidance, permission status, push status, enable/disable, and test notification.
+- Netlify configuration in `netlify.toml` with the Netlify Next.js plugin and scheduled function directory.
+- Netlify scheduled function wrappers for scheduled notifications and scheduled bank sync.
 - Vercel Cron configuration in `vercel.json` for scheduled notifications and scheduled bank sync.
-- Server-only deployment readiness and environment validation modules under `src/lib/deployment`.
+- Server-only deployment readiness and environment validation modules under `src/lib/deployment`, including Netlify, Vercel, local, and unknown platform detection.
 - Safe readiness page at `/settings/system-readiness`.
 - Structured server logging helper under `src/lib/observability`.
 - Global error and not-found pages with safe copy.
-- Staging smoke test, security checklist, and deployment checklist docs.
+- Netlify deployment guide, staging smoke test, security checklist, and deployment checklist docs.
 - Account-purpose default suggestions for American Express, Nationwide, and Revolut account patterns.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
@@ -63,7 +68,7 @@ Implemented locally:
 - Server-only provider token boundary stub. Real tokens are not stored in this phase.
 - Notification repository functions, deterministic notification generation helpers, privacy-safe copy helpers, and audit events.
 - Server-only token placeholder store with expiry metadata and client-safe payload helpers.
-- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, token-store boundaries, PWA files, install guidance, notification rules, provider mappers, provider safe errors, unauthenticated routes, Moneyhub readiness and callback handling, webhook parsing/idempotency, synced transaction UI, duplicate handling, reconciliation, sync queue, scheduled sync protection, manual refresh-all, and sync workflow.
+- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, token-store boundaries, PWA files, install guidance, notification rules, provider mappers, provider safe errors, unauthenticated routes, Moneyhub and TrueLayer readiness/callback handling, webhook parsing/idempotency, synced transaction UI, duplicate handling, reconciliation, sync queue, scheduled sync protection, manual refresh-all, and sync workflow.
 
 ## Product Direction
 
@@ -99,6 +104,7 @@ AI_MONEY_COACH_ENABLED=false
 WEB_PUSH_ENABLED=false
 SCHEDULED_ALERTS_ENABLED=false
 MONEYHUB_SANDBOX_ENABLED=false
+TRUELAYER_SANDBOX_ENABLED=false
 MOCK_DATA_FALLBACK_ENABLED=true
 ```
 
@@ -176,6 +182,39 @@ Troubleshooting:
 - Sync failed: reconnect if token metadata is missing, consent expired, or the provider reports a sandbox error.
 - Consent expired: use the connected accounts page to start a fresh sandbox consent flow.
 - Production Open Banking and financial data handling require provider terms review, privacy/security review, and any necessary regulatory/compliance assessment before broader use.
+
+## TrueLayer Sandbox Setup
+
+Phase 12A adds TrueLayer as a second provider adapter so the app can compare provider fit against Moneyhub before committing to one Open Banking provider. Provider-specific code remains inside `src/lib/bank-providers`, while the public app continues to use provider-agnostic routes and sync workflow helpers.
+
+Required placeholders:
+
+```bash
+OPEN_BANKING_PROVIDER=truelayer
+TRUELAYER_CLIENT_ID=
+TRUELAYER_CLIENT_SECRET=
+TRUELAYER_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback?provider=truelayer
+TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com
+TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com
+TRUELAYER_WEBHOOK_SECRET=
+TRUELAYER_SCOPES=info accounts balance cards transactions offline_access
+```
+
+Provider selection:
+
+- Use `OPEN_BANKING_PROVIDER=mock` for local development with no banking API calls.
+- Use `OPEN_BANKING_PROVIDER=moneyhub` to test the existing Moneyhub sandbox path.
+- Use `OPEN_BANKING_PROVIDER=truelayer` to test the TrueLayer sandbox adapter path.
+
+Settings / Connected Accounts shows readiness and provider comparison for mock, Moneyhub, and TrueLayer. The comparison covers accounts, balances, transactions, credit-card handling, regular-payment support, webhook support, and target institutions to validate.
+
+Target validation list:
+
+- American Express
+- Nationwide
+- Revolut
+
+Do not treat provider capability as confirmed until it has been tested with the provider sandbox or live test mode, appropriate credentials, redirect URL configuration, webhook configuration, and secure token storage.
 
 ## Provider Payload Inspection
 
@@ -592,19 +631,66 @@ Troubleshooting:
 
 ## Staging Deployment
 
-Phase 11 adds safe staging readiness checks and deployment runbooks.
+Phase 12B makes Netlify the primary staging deployment path. Vercel remains supported as a secondary option through `vercel.json`.
 
 Readiness:
 
 - Visit `/settings/system-readiness`.
-- Confirm Supabase, cron, base URL, optional Moneyhub sandbox, optional OpenAI, and optional Web Push checks.
+- Confirm the deployment platform shows Netlify for Netlify staging.
+- Confirm Supabase, cron, base URL, optional Moneyhub or TrueLayer sandbox, optional OpenAI, and optional Web Push checks.
 - The page shows labels, status, safe details, and remediation only. It must not show secret values.
+
+Netlify deployment steps:
+
+1. Create a Netlify site from this repository.
+2. Use `netlify.toml` for the build command, Next.js plugin, and scheduled function directory.
+3. Set staging environment variables in the Netlify UI.
+4. Keep service-role, provider, OpenAI, VAPID private key, and cron secret values server-side.
+5. Set `APP_BASE_URL` to the Netlify staging URL.
+6. Deploy staging.
+7. Run the smoke test checklist in `docs/staging-smoke-test.md`.
+
+Required for basic Netlify staging:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+APP_BASE_URL=
+CRON_SECRET=
+MOCK_DATA_FALLBACK_ENABLED=true
+```
+
+Optional Netlify integrations:
+
+```bash
+OPENAI_API_KEY=
+WEB_PUSH_VAPID_PUBLIC_KEY=
+WEB_PUSH_VAPID_PRIVATE_KEY=
+WEB_PUSH_SUBJECT=mailto:admin@example.com
+TRUELAYER_CLIENT_ID=
+TRUELAYER_CLIENT_SECRET=
+MONEYHUB_CLIENT_ID=
+MONEYHUB_CLIENT_SECRET=
+```
+
+Feature flags:
+
+```bash
+OPEN_BANKING_ENABLED=false
+AI_MONEY_COACH_ENABLED=false
+WEB_PUSH_ENABLED=false
+SCHEDULED_ALERTS_ENABLED=false
+MONEYHUB_SANDBOX_ENABLED=false
+TRUELAYER_SANDBOX_ENABLED=false
+MOCK_DATA_FALLBACK_ENABLED=true
+```
 
 Vercel deployment steps:
 
 1. Create a Vercel project from this repository.
 2. Set staging environment variables in Vercel Project Settings.
-3. Keep service-role, Moneyhub, OpenAI, VAPID private key, and cron secret server-side.
+3. Keep service-role, provider, OpenAI, VAPID private key, and cron secret values server-side.
 4. Deploy preview/staging.
 5. Run the smoke test checklist in `docs/staging-smoke-test.md`.
 
@@ -632,6 +718,13 @@ Moneyhub sandbox setup:
 - Use sandbox credentials only.
 - Confirm callback and webhook failures remain provider-safe.
 
+TrueLayer sandbox setup:
+
+- Set the staging callback URL to `/api/bank-connections/callback?provider=truelayer`.
+- Set the staging webhook URL to `/api/bank-connections/webhook/truelayer`.
+- Use sandbox credentials only.
+- Confirm callback and webhook failures remain provider-safe.
+
 OpenAI setup:
 
 - Set the OpenAI key server-side only.
@@ -646,7 +739,8 @@ VAPID setup:
 
 Cron setup:
 
-- Use `vercel.json` for Vercel Cron.
+- Use Netlify scheduled functions in `netlify/functions` for primary staging.
+- Use `vercel.json` for Vercel Cron when deploying the secondary path.
 - Supabase Cron may call the same HTTP routes.
 - Always send `CRON_SECRET`.
 - Confirm invalid secrets return 401.
@@ -662,13 +756,15 @@ iPhone PWA test:
 
 Rollback:
 
-- Keep the previous Vercel deployment available.
-- Revert to the previous deployment if smoke tests fail.
+- Keep the previous Netlify deployment available.
+- Revert to the previous Netlify deployment if smoke tests fail.
+- Keep the previous Vercel deployment available if using the secondary path.
 - Roll back database changes only with a reviewed migration plan.
 - Rotate secrets if a staging secret is exposed.
 
 Supporting docs:
 
+- `docs/netlify-deployment.md`
 - `docs/staging-smoke-test.md`
 - `docs/security-checklist.md`
 - `docs/deployment-checklist.md`
@@ -692,7 +788,7 @@ The adapter interface supports:
 - `refreshConnection()`
 - `revokeConnection()`
 
-Phase 10 keeps `mockOpenBankingProvider` available, uses the Moneyhub sandbox adapter behind the provider abstraction, and builds transaction intelligence plus scheduled notifications on top of synced or mock transaction data. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
+Phase 12A keeps `mockOpenBankingProvider` available and supports Moneyhub plus TrueLayer sandbox adapter options behind the provider abstraction. Tink and Plaid remain modelled provider names only. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
 
 ## Open Banking Token Boundary
 
@@ -711,6 +807,7 @@ AI_MONEY_COACH_ENABLED=false
 WEB_PUSH_ENABLED=false
 SCHEDULED_ALERTS_ENABLED=false
 MONEYHUB_SANDBOX_ENABLED=false
+TRUELAYER_SANDBOX_ENABLED=false
 MOCK_DATA_FALLBACK_ENABLED=true
 OPEN_BANKING_CLIENT_ID=
 OPEN_BANKING_CLIENT_SECRET=
@@ -725,6 +822,13 @@ MONEYHUB_AUTH_BASE_URL=https://identity.moneyhub.co.uk
 MONEYHUB_JWKS_URL=
 MONEYHUB_PRIVATE_KEY=
 MONEYHUB_KEY_ID=
+TRUELAYER_CLIENT_ID=
+TRUELAYER_CLIENT_SECRET=
+TRUELAYER_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback?provider=truelayer
+TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com
+TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com
+TRUELAYER_WEBHOOK_SECRET=
+TRUELAYER_SCOPES=info accounts balance cards transactions offline_access
 OPEN_BANKING_PROVIDER_PAYLOAD_DEBUG=false
 PROVIDER_PAYLOAD_DEBUG_DIR=.debug/provider-payloads
 CRON_SECRET=

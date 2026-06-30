@@ -4,7 +4,7 @@ Use this checklist before staging and before any wider production use.
 
 ## Secrets Handling
 
-- Store Supabase, Moneyhub, OpenAI, VAPID and cron secrets only in deployment environment variables.
+- Store Supabase, Moneyhub, TrueLayer, OpenAI, VAPID and cron secrets only in deployment environment variables.
 - Do not commit `.env.local` or real credentials.
 - Expose only client-safe public keys to browser code.
 - Confirm readiness pages do not show secret names or secret values unnecessarily.
@@ -41,8 +41,10 @@ Use this checklist before staging and before any wider production use.
 ## Webhooks And Cron
 
 - Verify Moneyhub webhook signatures before production use.
+- Verify TrueLayer webhook signatures before production use.
 - Keep webhook payload logging redacted.
 - Protect scheduled routes with `CRON_SECRET`.
+- Keep Netlify scheduled functions as wrappers around protected API routes.
 - Rotate cron secret if exposed.
 
 ## Audit Logging

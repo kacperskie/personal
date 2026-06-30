@@ -2,6 +2,13 @@
 
 Use this checklist after deploying Personal Finance HQ to staging. Use fake/demo data only.
 
+## Deployment Platform
+
+- Deploy to Netlify as the primary staging path.
+- Confirm `netlify.toml` was used for the build.
+- Confirm `/settings/system-readiness` shows Netlify as the deployment platform.
+- Confirm Vercel support remains available as a secondary path if needed.
+
 ## Access And Auth
 
 - Sign up with a staging test account.
@@ -32,8 +39,11 @@ Use this checklist after deploying Personal Finance HQ to staging. Use fake/demo
 
 - Open Settings / Connected Accounts.
 - Confirm provider readiness copy is safe.
+- Confirm Moneyhub and TrueLayer readiness copy is safe.
 - Start Moneyhub sandbox connection.
 - If Moneyhub is not configured, confirm the route returns a safe not-configured state.
+- Start TrueLayer sandbox connection.
+- If TrueLayer is not configured, confirm the route returns a safe not-configured state.
 - Visit the callback route with invalid state and confirm safe failure.
 - Run manual sync with Moneyhub disabled and confirm safe failure.
 
@@ -68,6 +78,7 @@ Use this checklist after deploying Personal Finance HQ to staging. Use fake/demo
 - Call `/api/notifications/scheduled` with invalid secret and expect 401.
 - Call `/api/bank-connections/scheduled-sync` with invalid secret and expect 401.
 - Call both routes with staging cron secret and confirm safe JSON output.
+- Confirm Netlify scheduled function wrappers exist for notifications and bank sync.
 
 ## Final Checks
 

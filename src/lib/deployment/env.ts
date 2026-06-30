@@ -1,6 +1,7 @@
 import "server-only";
 
 export type DeploymentEnvironment = "local" | "staging" | "production";
+export type DeploymentPlatform = "netlify" | "vercel" | "local" | "unknown";
 
 export type FeatureFlags = {
   openBankingEnabled: boolean;
@@ -8,12 +9,20 @@ export type FeatureFlags = {
   webPushEnabled: boolean;
   scheduledAlertsEnabled: boolean;
   moneyhubSandboxEnabled: boolean;
+  truelayerSandboxEnabled: boolean;
   mockDataFallbackEnabled: boolean;
 };
 
 export type EnvironmentValidation = {
   deploymentEnvironment: DeploymentEnvironment;
+  deploymentPlatform: DeploymentPlatform;
   appBaseUrl: string | null;
+  netlify: {
+    context: string | null;
+    deployPrimeUrlConfigured: boolean;
+    urlConfigured: boolean;
+    siteNameConfigured: boolean;
+  };
   publicClientSafe: {
     supabaseUrlConfigured: boolean;
     supabaseAnonKeyConfigured: boolean;
@@ -23,6 +32,7 @@ export type EnvironmentValidation = {
     supabaseServiceRoleConfigured: boolean;
     openAiConfigured: boolean;
     moneyhubSandboxConfigured: boolean;
+    truelayerSandboxConfigured: boolean;
     webPushPrivateKeyConfigured: boolean;
     cronSecretConfigured: boolean;
   };
@@ -39,17 +49,49 @@ function enabled(value: string | undefined, defaultValue = false) {
 }
 
 function deploymentEnvironment(env: NodeJS.ProcessEnv): DeploymentEnvironment {
-  const value = env.APP_ENV ?? env.VERCEL_ENV ?? env.NODE_ENV;
+  const value = env.APP_ENV ?? env.CONTEXT ?? env.VERCEL_ENV ?? env.NODE_ENV;
 
   if (value === "production") {
     return "production";
   }
 
-  if (value === "staging" || value === "preview") {
+  if (value === "staging" || value === "preview" || value === "deploy-preview" || value === "branch-deploy") {
     return "staging";
   }
 
   return "local";
+}
+
+export function detectDeploymentPlatform(
+  env: NodeJS.ProcessEnv = process.env,
+): DeploymentPlatform {
+  if (env.NETLIFY === "true") {
+    return "netlify";
+  }
+
+  if (env.VERCEL === "1" || env.VERCEL === "true") {
+    return "vercel";
+  }
+
+  if (
+    env.NODE_ENV === "development" ||
+    env.NEXT_RUNTIME === "nodejs" ||
+    env.APP_ENV === "local"
+  ) {
+    return "local";
+  }
+
+  return "unknown";
+}
+
+function normaliseUrl(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  return value.startsWith("http://") || value.startsWith("https://")
+    ? value
+    : `https://${value}`;
 }
 
 export function getFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureFlags {
@@ -59,6 +101,7 @@ export function getFeatureFlags(env: NodeJS.ProcessEnv = process.env): FeatureFl
     webPushEnabled: enabled(env.WEB_PUSH_ENABLED, false),
     scheduledAlertsEnabled: enabled(env.SCHEDULED_ALERTS_ENABLED, false),
     moneyhubSandboxEnabled: enabled(env.MONEYHUB_SANDBOX_ENABLED, false),
+    truelayerSandboxEnabled: enabled(env.TRUELAYER_SANDBOX_ENABLED, false),
     mockDataFallbackEnabled: enabled(env.MOCK_DATA_FALLBACK_ENABLED, true),
   };
 }
@@ -67,12 +110,23 @@ export function validateDeploymentEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): EnvironmentValidation {
   const flags = getFeatureFlags(env);
-  const appBaseUrl = env.NEXT_PUBLIC_APP_BASE_URL ?? env.APP_BASE_URL ?? env.VERCEL_URL ?? null;
+  const appBaseUrl =
+    normaliseUrl(env.NEXT_PUBLIC_APP_BASE_URL) ??
+    normaliseUrl(env.APP_BASE_URL) ??
+    normaliseUrl(env.URL) ??
+    normaliseUrl(env.DEPLOY_PRIME_URL) ??
+    normaliseUrl(env.VERCEL_URL);
   const moneyhubSandboxConfigured = Boolean(
     env.MONEYHUB_CLIENT_ID &&
       env.MONEYHUB_CLIENT_SECRET &&
       env.MONEYHUB_REDIRECT_URI &&
       env.MONEYHUB_WEBHOOK_SECRET,
+  );
+  const truelayerSandboxConfigured = Boolean(
+    env.TRUELAYER_CLIENT_ID &&
+      env.TRUELAYER_CLIENT_SECRET &&
+      env.TRUELAYER_REDIRECT_URI &&
+      env.TRUELAYER_WEBHOOK_SECRET,
   );
   const webPushConfigured = Boolean(
     env.WEB_PUSH_VAPID_PUBLIC_KEY &&
@@ -81,7 +135,14 @@ export function validateDeploymentEnvironment(
   );
   const validation: EnvironmentValidation = {
     deploymentEnvironment: deploymentEnvironment(env),
+    deploymentPlatform: detectDeploymentPlatform(env),
     appBaseUrl,
+    netlify: {
+      context: env.CONTEXT ?? null,
+      deployPrimeUrlConfigured: Boolean(env.DEPLOY_PRIME_URL),
+      urlConfigured: Boolean(env.URL),
+      siteNameConfigured: Boolean(env.SITE_NAME),
+    },
     publicClientSafe: {
       supabaseUrlConfigured: Boolean(env.NEXT_PUBLIC_SUPABASE_URL),
       supabaseAnonKeyConfigured: Boolean(env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
@@ -91,6 +152,7 @@ export function validateDeploymentEnvironment(
       supabaseServiceRoleConfigured: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
       openAiConfigured: Boolean(env.OPENAI_API_KEY),
       moneyhubSandboxConfigured,
+      truelayerSandboxConfigured,
       webPushPrivateKeyConfigured: Boolean(env.WEB_PUSH_VAPID_PRIVATE_KEY),
       cronSecretConfigured: Boolean(env.CRON_SECRET),
     },
@@ -105,8 +167,19 @@ export function validateDeploymentEnvironment(
     ["Cron secret", validation.serverOnly.cronSecretConfigured],
   ];
 
-  if (flags.openBankingEnabled || flags.moneyhubSandboxEnabled) {
-    requiredForStaging.push(["Moneyhub sandbox configuration", moneyhubSandboxConfigured]);
+  if (flags.openBankingEnabled || flags.moneyhubSandboxEnabled || flags.truelayerSandboxEnabled) {
+    const selectedProvider = env.OPEN_BANKING_PROVIDER ?? "mock";
+    const selectedProviderConfigured =
+      selectedProvider === "truelayer"
+        ? truelayerSandboxConfigured
+        : selectedProvider === "moneyhub"
+          ? moneyhubSandboxConfigured
+          : true;
+
+    requiredForStaging.push([
+      "Selected Open Banking sandbox configuration",
+      selectedProviderConfigured,
+    ]);
   }
 
   if (flags.webPushEnabled) {
@@ -138,5 +211,6 @@ export function clientSafeEnvironmentSummary(env: NodeJS.ProcessEnv = process.en
     aiMoneyCoachEnabled: validation.featureFlags.aiMoneyCoachEnabled,
     webPushEnabled: validation.featureFlags.webPushEnabled,
     scheduledAlertsEnabled: validation.featureFlags.scheduledAlertsEnabled,
+    deploymentPlatform: validation.deploymentPlatform,
   };
 }

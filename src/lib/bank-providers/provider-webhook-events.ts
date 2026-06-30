@@ -4,6 +4,7 @@ import type {
   ProviderWebhookProcessingStatus,
 } from "@/lib/domain";
 import type { ParsedMoneyhubWebhook } from "@/lib/bank-providers/moneyhub-webhooks";
+import type { ParsedTrueLayerWebhook } from "@/lib/bank-providers/truelayer-webhooks";
 import type { Database } from "@/lib/supabase/database.types";
 import { createSupabaseServiceRoleClient } from "@/lib/supabase/admin";
 
@@ -11,6 +12,8 @@ type ProviderWebhookEventRow =
   Database["public"]["Tables"]["provider_webhook_events"]["Row"];
 
 const fallbackWebhookEvents = new Map<string, ProviderWebhookEvent>();
+
+type ParsedProviderWebhook = ParsedMoneyhubWebhook | ParsedTrueLayerWebhook;
 
 function eventKey(provider: BankProvider, providerEventId: string) {
   return `${provider}:${providerEventId}`;
@@ -37,7 +40,7 @@ function providerWebhookEventFromRow(row: ProviderWebhookEventRow): ProviderWebh
 function createWebhookEvent(input: {
   userId: string;
   provider: BankProvider;
-  parsed: ParsedMoneyhubWebhook;
+  parsed: ParsedProviderWebhook;
   processingStatus?: ProviderWebhookProcessingStatus;
 }): ProviderWebhookEvent {
   const now = input.parsed.receivedAt;
@@ -65,7 +68,7 @@ function createWebhookEvent(input: {
 export async function recordProviderWebhookEventOnce(input: {
   userId: string;
   provider: BankProvider;
-  parsed: ParsedMoneyhubWebhook;
+  parsed: ParsedProviderWebhook;
 }): Promise<{ event: ProviderWebhookEvent; isDuplicate: boolean }> {
   const supabase = createSupabaseServiceRoleClient();
   const key = eventKey(input.provider, input.parsed.providerEventId);

@@ -1,6 +1,6 @@
 # Deployment Checklist
 
-Use this for staging first. Do not use production credentials in the repository.
+Use this for staging first. Netlify is the primary staging deployment path; Vercel remains supported as a secondary option. Do not use production credentials in the repository.
 
 ## Pre-Deployment
 
@@ -11,6 +11,8 @@ Use this for staging first. Do not use production credentials in the repository.
 - Run `npm audit --audit-level=moderate`.
 - Confirm all seeded data is fake.
 - Confirm `.env.local` is not committed.
+- Confirm `netlify.toml` is present.
+- Confirm `vercel.json` is still present for secondary deployment support.
 
 ## Environment Variables
 
@@ -19,7 +21,10 @@ Use this for staging first. Do not use production credentials in the repository.
 - Set `CRON_SECRET`.
 - Set `NEXT_PUBLIC_APP_BASE_URL` or `APP_BASE_URL`.
 - Set feature flags for staging.
+- Set Netlify environment variables in the Netlify UI, not in the repository.
+- Set `APP_BASE_URL` to the Netlify staging URL.
 - Set Moneyhub sandbox variables only if testing Moneyhub.
+- Set TrueLayer sandbox variables only if testing TrueLayer.
 - Set OpenAI key only if testing live AI.
 - Set VAPID keys only if testing Web Push.
 
@@ -41,11 +46,15 @@ Use this for staging first. Do not use production credentials in the repository.
 
 - Add the staging Moneyhub callback URL.
 - Add the staging Moneyhub webhook URL.
+- Add the staging TrueLayer callback URL.
+- Add the staging TrueLayer webhook URL.
 - Confirm webhook route returns safe responses for invalid payloads.
 
 ## Scheduled Jobs
 
-- Configure Vercel Cron from `vercel.json` or Supabase Cron HTTP calls.
+- Configure Netlify scheduled functions from `netlify/functions`.
+- Keep Vercel Cron from `vercel.json` available as a secondary option.
+- Supabase Cron HTTP calls remain compatible.
 - Pass `CRON_SECRET` using Authorization bearer header or `x-cron-secret`.
 - Confirm invalid secrets are rejected.
 
@@ -57,8 +66,9 @@ Use this for staging first. Do not use production credentials in the repository.
 
 ## Rollback
 
-- Keep the previous Vercel deployment available.
-- Revert to the previous deployment if smoke tests fail.
+- Keep the previous Netlify deployment available.
+- Revert to the previous Netlify deployment if smoke tests fail.
+- Keep the previous Vercel deployment available if using the secondary path.
 - Roll back database changes only with a reviewed migration plan.
 - Rotate secrets if a staging secret is exposed.
 

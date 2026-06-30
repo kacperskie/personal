@@ -26,9 +26,7 @@ export async function runServerConnectionSync({
   createNotifications?: boolean;
 }): Promise<SyncWorkflowResult> {
   const tokenRecord =
-    connection.provider === "moneyhub"
-      ? await getProviderToken(userId, connection.id)
-      : null;
+    connection.provider === "mock" ? null : await getProviderToken(userId, connection.id);
   const providerAccountIds = accountIds.length > 0 ? accountIds : undefined;
   const result = await syncBankConnection({
     userId,

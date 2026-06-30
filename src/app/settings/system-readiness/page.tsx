@@ -25,7 +25,7 @@ export default function SystemReadinessPage() {
       <PageHeader
         eyebrow="Staging readiness"
         title="System Readiness"
-        description="Safe deployment checks for Supabase, Moneyhub sandbox, OpenAI, PWA push, scheduled jobs, and redirect setup. Secret values are never shown."
+        description="Safe deployment checks for Netlify, Vercel fallback, Supabase, Open Banking providers, OpenAI, PWA push, scheduled jobs, and redirect setup. Secret values are never shown."
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
@@ -36,7 +36,8 @@ export default function SystemReadinessPage() {
               <h2 className="text-lg font-semibold text-ink">Readiness summary</h2>
             </div>
             <p className="mt-2 text-sm text-ink/65">
-              Environment: {report.environment}. Generated at {report.generatedAt}.
+              Platform: {report.deploymentPlatform}. Environment: {report.environment}.
+              Generated at {report.generatedAt}.
             </p>
           </div>
           <StatusPill

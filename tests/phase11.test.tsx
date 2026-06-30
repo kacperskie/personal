@@ -22,6 +22,9 @@ describe("phase 11 staging readiness", () => {
     const env = {
       NODE_ENV: "production",
       APP_ENV: "staging",
+      NETLIFY: "true",
+      CONTEXT: "deploy-preview",
+      URL: "https://staging.example.com",
       NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-public",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-secret-value",
@@ -80,6 +83,7 @@ describe("phase 11 staging readiness", () => {
       webPushEnabled: false,
       scheduledAlertsEnabled: false,
       moneyhubSandboxEnabled: false,
+      truelayerSandboxEnabled: false,
       mockDataFallbackEnabled: true,
     });
   });

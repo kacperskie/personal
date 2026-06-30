@@ -43,9 +43,7 @@ export async function POST(
   }
 
   const tokenRecord =
-    connection.provider === "moneyhub"
-      ? await getProviderToken(auth.user.id, connection.id)
-      : null;
+    connection.provider === "mock" ? null : await getProviderToken(auth.user.id, connection.id);
   const result = await syncBankConnection({
     userId: auth.user.id,
     connection,

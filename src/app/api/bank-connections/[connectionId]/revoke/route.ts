@@ -45,9 +45,9 @@ export async function POST(
   try {
     const provider = getProviderAdapter(connection.provider);
     const tokenRecord =
-      connection.provider === "moneyhub"
-        ? await getProviderToken(auth.user.id, connection.id)
-        : null;
+      connection.provider === "mock"
+        ? null
+        : await getProviderToken(auth.user.id, connection.id);
     const revoked = await provider.revokeConnection(connection.id, {
       providerUserId: tokenRecord?.providerUserId,
       providerConnectionId: tokenRecord?.providerConnectionId,

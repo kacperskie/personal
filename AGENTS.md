@@ -54,16 +54,20 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 
 ## Supabase and Open Banking rules
 - Required local placeholders: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-- Open Banking uses Moneyhub as the first sandbox proof-of-concept provider while preserving the mock provider fallback.
+- Open Banking uses Moneyhub as the first sandbox proof-of-concept provider and TrueLayer as a comparison adapter while preserving the mock provider fallback.
 - Provider-specific code must stay behind `src/lib/bank-providers`.
 - Public app code should call provider-agnostic routes, services, or repository functions only.
 - Open Banking placeholders stay sandbox-only until a provider sandbox is explicitly configured.
 - Moneyhub sandbox setup uses `OPEN_BANKING_PROVIDER=moneyhub`, Moneyhub client credentials, redirect URI, webhook secret, sandbox base URLs, and optional JWKS/private-key references.
+- TrueLayer sandbox setup uses `OPEN_BANKING_PROVIDER=truelayer`, TrueLayer client credentials, redirect URI, webhook secret, sandbox base URLs, and scopes.
+- Keep `OPEN_BANKING_PROVIDER` provider selection limited to implemented adapters (`mock`, `moneyhub`, `truelayer`) unless adding and testing another adapter.
+- Do not remove Moneyhub, TrueLayer, or mock fallback unless explicitly requested.
 - OAuth callback state and nonce must be verified server-side before saving connection metadata.
 - Provider tokens must only be handled in server-only modules.
 - Token-store code may save encrypted-token placeholders, token references, scopes, expiry metadata, and revocation metadata only.
 - Provider sync must upsert by stable provider transaction identity and preserve reviewed user category choices on repeat sync.
 - Moneyhub webhooks are placeholder-only until signature verification and payload handling are reviewed for production.
+- TrueLayer webhooks are placeholder-only until signature verification and payload handling are reviewed for production.
 - Phase 8A webhook sync is sandbox-only and handles Moneyhub transaction/sync events through `src/lib/bank-providers` and server-side routes only.
 - Moneyhub webhook handling must remain idempotent by `provider + provider_event_id`; duplicate webhooks must not duplicate transactions, notifications, sync jobs, or audit events.
 - Use the lightweight sync queue for event-driven and scheduled sync fallback before adding any paid queue provider.
@@ -116,6 +120,10 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 
 ## Deployment and staging rules
 - Staging comes before production.
+- Netlify is the primary staging deployment path.
+- Preserve Vercel support as a secondary deployment option unless explicitly removed.
+- Keep Netlify scheduled functions as thin wrappers around protected API routes; do not duplicate scheduled business logic there.
+- Keep `netlify.toml`, `vercel.json`, and deployment docs aligned when deployment behaviour changes.
 - Do not commit real production credentials, staging credentials, provider credentials, OpenAI keys, VAPID private keys, cron secrets, Supabase service-role keys, provider tokens, or real financial data.
 - Do not use real financial data in tests, fixtures, seed data, screenshots, logs, or docs.
 - Keep deployment readiness checks server-side and expose only safe status, labels, and remediation.

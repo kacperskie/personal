@@ -4,7 +4,11 @@ import { useMemo, useState, useTransition } from "react";
 import { Cable, RefreshCw, ShieldAlert, Unplug } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import type { BankConnection, BankProvider, ConnectionLifecycleStatus } from "@/lib/domain";
-import type { MoneyhubSandboxReadiness } from "@/lib/bank-providers/provider-config";
+import type {
+  MoneyhubSandboxReadiness,
+  ProviderComparisonCapability,
+  TrueLayerSandboxReadiness,
+} from "@/lib/bank-providers/provider-config";
 import { formatDateShort } from "@/lib/format";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
 
@@ -20,6 +24,7 @@ const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warnin
 
 const providerOptions: Array<{ value: BankProvider; label: string }> = [
   { value: "moneyhub", label: "Moneyhub sandbox" },
+  { value: "truelayer", label: "TrueLayer sandbox" },
   { value: "mock", label: "Mock provider" },
 ];
 
@@ -39,6 +44,8 @@ export function ConnectedAccountsManager({
     configured: boolean;
     safeMessage: string;
     moneyhubReadiness?: MoneyhubSandboxReadiness;
+    truelayerReadiness?: TrueLayerSandboxReadiness;
+    providerComparison?: ProviderComparisonCapability[];
   };
 }) {
   const [selectedProvider, setSelectedProvider] = useState<BankProvider>(
@@ -81,9 +88,17 @@ export function ConnectedAccountsManager({
       void postJson("/api/bank-connections/start", {
         provider: selectedProvider,
         institutionId:
-          selectedProvider === "moneyhub" ? "moneyhub_sandbox" : "mock_sandbox",
+          selectedProvider === "moneyhub"
+            ? "moneyhub_sandbox"
+            : selectedProvider === "truelayer"
+              ? "truelayer_sandbox"
+              : "mock_sandbox",
         institutionName:
-          selectedProvider === "moneyhub" ? "Moneyhub sandbox" : "Mock sandbox",
+          selectedProvider === "moneyhub"
+            ? "Moneyhub sandbox"
+            : selectedProvider === "truelayer"
+              ? "TrueLayer sandbox"
+              : "Mock sandbox",
       })
         .then((payload) => {
           if (payload.authorizationUrl) {
@@ -199,6 +214,135 @@ export function ConnectedAccountsManager({
         </section>
       ) : null}
 
+      {providerState.truelayerReadiness ? (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-ink">TrueLayer sandbox readiness</h2>
+              <p className="mt-2 text-sm leading-6 text-ink/70">
+                {providerState.truelayerReadiness.safeMessage}
+              </p>
+            </div>
+            <StatusPill
+              label={
+                providerState.truelayerReadiness.configured
+                  ? "configured"
+                  : "not configured"
+              }
+              tone={providerState.truelayerReadiness.configured ? "good" : "warning"}
+            />
+          </div>
+          <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Provider selected</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.providerSelected ? "TrueLayer" : "Mock/other"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Sandbox mode</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.sandboxModeEnabled ? "Enabled" : "Not enabled"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Webhook secret</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.webhookSecretConfigured
+                  ? "Configured"
+                  : "Missing"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Token store</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.tokenStoreAvailable
+                  ? "Server-only stub"
+                  : "Unavailable"}
+              </dd>
+            </div>
+          </dl>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
+            <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/70">
+              <p className="font-semibold text-ink">Expected redirect URI</p>
+              <p className="mt-1 break-all">
+                {providerState.truelayerReadiness.redirectUri ?? "Not configured"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/70">
+              <p className="font-semibold text-ink">Missing environment variables</p>
+              <p className="mt-1">
+                {providerState.truelayerReadiness.missingEnvironment.length > 0
+                  ? providerState.truelayerReadiness.missingEnvironment.join(", ")
+                  : "None required for sandbox client initialisation are missing."}
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {providerState.providerComparison ? (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Provider comparison</h2>
+            <p className="mt-2 text-sm leading-6 text-ink/70">
+              Capability rows show sandbox adapter readiness only. American Express,
+              Nationwide, and Revolut remain target institutions to validate with provider
+              sandbox credentials.
+            </p>
+          </div>
+          <div className="mt-5 grid gap-4 xl:grid-cols-3">
+            {providerState.providerComparison.map((provider) => (
+              <article key={provider.provider} className="rounded-lg border border-line bg-paper p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-semibold text-ink">{provider.label}</h3>
+                  <StatusPill
+                    label={provider.sandboxReady ? "sandbox ready" : "needs setup"}
+                    tone={provider.sandboxReady ? "good" : "warning"}
+                  />
+                </div>
+                <dl className="mt-4 grid gap-2 text-sm text-ink/70">
+                  <div className="flex justify-between gap-3">
+                    <dt>Accounts</dt>
+                    <dd className="font-semibold text-ink">{provider.accountsSupport}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Balances</dt>
+                    <dd className="font-semibold text-ink">{provider.balancesSupport}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Transactions</dt>
+                    <dd className="font-semibold text-ink">{provider.transactionsSupport}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Credit cards</dt>
+                    <dd className="font-semibold text-ink">{provider.creditCardsSupport}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Regular payments</dt>
+                    <dd className="font-semibold text-ink">{provider.regularPaymentsSupport}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Webhooks</dt>
+                    <dd className="font-semibold text-ink">{provider.webhookSupport}</dd>
+                  </div>
+                </dl>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {provider.targetInstitutions.map((institution) => (
+                    <span
+                      key={`${provider.provider}-${institution}`}
+                      className="rounded-full border border-line bg-white px-2.5 py-1 text-xs font-semibold text-ink/65"
+                    >
+                      Validate: {institution}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,auto)] lg:items-start">
           <div>
@@ -208,7 +352,8 @@ export function ConnectedAccountsManager({
             </div>
             <p className="mt-2 text-sm leading-6 text-ink/70">
               Provider-specific work stays behind the adapter. Moneyhub is the first
-              sandbox-ready provider skeleton; mock remains available for local fallback.
+              sandbox proof of concept, TrueLayer is available for comparison, and mock
+              remains available for local fallback.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {targetInstitutions.map((institution) => (
