@@ -30,7 +30,10 @@ export type AuditEventType =
   | "notification_dismissed"
   | "push_notification_permission_requested"
   | "push_subscription_placeholder_saved"
-  | "push_subscription_placeholder_deleted";
+  | "push_subscription_placeholder_deleted"
+  | "ai_money_coach_requested"
+  | "ai_money_coach_failed"
+  | "ai_insight_created";
 
 export type AuditEventInput = {
   userId: string;

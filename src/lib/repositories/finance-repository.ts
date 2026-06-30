@@ -1,9 +1,12 @@
 import type {
   Account,
+  AIInsight,
   BankConnection,
   Bill,
   Budget,
+  BudgetPeriod,
   Category,
+  Debt,
   DetectedBill,
   DetectedSubscription,
   ManualFinanceItem,
@@ -16,27 +19,36 @@ import type {
   TransactionEnrichment,
   CashflowEvent,
   Transaction,
+  UserProfile,
 } from "@/lib/domain";
 import {
   mockAccounts,
   mockBankConnections,
   mockBills,
+  mockBudgetPeriods,
   mockBudgets,
   mockCategories,
+  mockDebts,
+  mockAIInsights,
   mockManualFinanceItems,
   mockSavingsGoals,
   mockSubscriptions,
   mockTransactionRecords,
+  mockUserProfile,
 } from "@/lib/mock-data";
 import {
   accountFromRow,
   accountToRow,
+  aiInsightFromRow,
+  aiInsightToRow,
   bankConnectionFromRow,
   bankConnectionToRow,
   billFromRow,
+  budgetPeriodFromRow,
   budgetFromRow,
   categoryFromRow,
   cashflowEventFromRow,
+  debtFromRow,
   detectedBillFromRow,
   detectedBillToRow,
   detectedSubscriptionFromRow,
@@ -82,6 +94,9 @@ const fallbackRecurringCandidates = new Map<string, RecurringPaymentCandidate>()
 const fallbackDetectedBills = new Map<string, DetectedBill>();
 const fallbackDetectedSubscriptions = new Map<string, DetectedSubscription>();
 const fallbackEnrichments = new Map<string, TransactionEnrichment>();
+const fallbackAIInsights = new Map<string, AIInsight>(
+  mockAIInsights.map((insight) => [insight.id, insight]),
+);
 
 async function getAuthenticatedContext() {
   const supabase = await createSupabaseServerClient();
@@ -144,6 +159,42 @@ export async function getAccounts(): Promise<Account[]> {
   }
 
   return data.map(accountFromRow);
+}
+
+export async function getUserProfile(): Promise<UserProfile> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return mockUserProfile;
+  }
+
+  const { data, error } = await context.supabase
+    .from("profiles")
+    .select("*")
+    .eq("user_id", context.userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) {
+    return {
+      ...mockUserProfile,
+      id: context.userId,
+    };
+  }
+
+  return {
+    id: data.user_id,
+    displayName: data.display_name,
+    locale: data.locale,
+    currency: data.currency,
+    paydayDayOfMonth: data.payday_day_of_month,
+    minimumBuffer: data.minimum_buffer,
+    createdAt: data.created_at,
+    updatedAt: data.updated_at,
+  };
 }
 
 export async function upsertAccount(account: Account): Promise<Account> {
@@ -688,6 +739,25 @@ export async function getBudgets(): Promise<Budget[]> {
   return data.map(budgetFromRow);
 }
 
+export async function getBudgetPeriods(): Promise<BudgetPeriod[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return mockBudgetPeriods;
+  }
+
+  const { data, error } = await context.supabase
+    .from("budget_periods")
+    .select("*")
+    .order("start_date", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(budgetPeriodFromRow);
+}
+
 export async function getBills(): Promise<Bill[]> {
   const context = await getAuthenticatedContext();
 
@@ -743,6 +813,62 @@ export async function getSavingsGoals(): Promise<SavingsGoal[]> {
   }
 
   return data.map(savingsGoalFromRow);
+}
+
+export async function getDebts(): Promise<Debt[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return mockDebts;
+  }
+
+  const { data, error } = await context.supabase
+    .from("debts")
+    .select("*")
+    .order("due_date");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(debtFromRow);
+}
+
+export async function createAIInsight(insight: AIInsight): Promise<AIInsight> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    fallbackAIInsights.set(insight.id, insight);
+    return insight;
+  }
+
+  const { data, error } = await context.supabase
+    .from("ai_insights")
+    .insert(aiInsightToRow({ ...insight, userId: context.userId }, context.userId))
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await writeAudit(
+    context.userId,
+    createAuditEvent({
+      userId: context.userId,
+      eventType: "ai_insight_created",
+      entity: "ai_insights",
+      entityId: insight.id,
+      metadata: {
+        mode: insight.mode ?? insight.type,
+        model: insight.model ?? null,
+        errorStatus: insight.errorStatus ?? null,
+      },
+    }),
+    context.supabase,
+  );
+
+  return aiInsightFromRow(data);
 }
 
 export async function getMerchantRules(): Promise<MerchantRule[]> {

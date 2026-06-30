@@ -15,10 +15,11 @@ import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import {
   budgetHealth,
-  dashboardInsight,
   dashboardSummary,
   upcomingBills,
 } from "@/lib/mock-data";
+import { buildMoneyCoachContext } from "@/lib/ai/context-builder";
+import { buildDeterministicMoneyCoachFallback } from "@/lib/ai/money-coach";
 import { formatCurrency } from "@/lib/format";
 import {
   getAccounts,
@@ -49,6 +50,14 @@ export default async function DashboardPage() {
     getSpendingAnomalies(),
     getTransactionEnrichments(),
   ]);
+  const moneyCoachContext = await buildMoneyCoachContext({
+    mode: "weekly_review",
+    question: "Dashboard money coach summary",
+  });
+  const moneyCoachSummary = buildDeterministicMoneyCoachFallback(
+    moneyCoachContext,
+    "weekly_review",
+  );
   const cashflowForecast = forecastCashflow({
     accounts,
     events: cashflowEvents,
@@ -217,20 +226,34 @@ export default async function DashboardPage() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.75fr)_minmax(280px,0.25fr)] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-teal">
-              AI money coach summary
+              Money coach summary
             </p>
             <h2 className="mt-2 text-xl font-semibold text-ink">
-              {dashboardInsight.title}
+              {moneyCoachSummary.answerSummary}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-ink/70">
-              {dashboardInsight.summary}
+              {moneyCoachSummary.explanation.slice(0, 2).join(" ")}
             </p>
           </div>
           <div className="rounded-lg border border-teal/20 bg-white p-4">
             <p className="text-sm font-semibold text-ink">Next action</p>
             <p className="mt-2 text-sm text-ink/70">
-              {dashboardInsight.nextAction}
+              {moneyCoachSummary.suggestedNextActions[0]}
             </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href="/ai-coach"
+                className="inline-flex min-h-10 items-center rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white"
+              >
+                Ask why
+              </a>
+              <a
+                href="/ai-coach"
+                className="inline-flex min-h-10 items-center rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink/70"
+              >
+                View details
+              </a>
+            </div>
           </div>
         </div>
       </section>

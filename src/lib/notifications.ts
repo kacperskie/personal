@@ -32,6 +32,10 @@ export const notificationTypes: NotificationType[] = [
   "unusual_spending",
   "projected_bills_account_shortfall",
   "transaction_needs_review",
+  "ai_monthly_review_ready",
+  "ai_payday_plan_ready",
+  "ai_review_failed",
+  "openai_not_configured",
   "payday_planning",
   "manual_item_review",
   "safe_to_spend_change",
@@ -125,6 +129,22 @@ const privacyCopy: Record<NotificationType, { title: string; body: string }> = {
   transaction_needs_review: {
     title: "Transaction needs review",
     body: "A transaction needs categorisation review.",
+  },
+  ai_monthly_review_ready: {
+    title: "Money coach review ready",
+    body: "A finance review is ready inside the app.",
+  },
+  ai_payday_plan_ready: {
+    title: "Payday plan ready",
+    body: "A payday planning summary is ready inside the app.",
+  },
+  ai_review_failed: {
+    title: "Money coach needs attention",
+    body: "A finance review could not be generated.",
+  },
+  openai_not_configured: {
+    title: "Money coach unavailable",
+    body: "The AI coach is not configured yet.",
   },
   payday_planning: {
     title: "Payday planning",

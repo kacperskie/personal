@@ -109,7 +109,7 @@ describe("phase 5 notifications and PWA", () => {
   it("creates notification preference defaults", () => {
     const preferences = createDefaultNotificationPreferences("user_test", "2026-06-30T00:00:00.000Z");
 
-    expect(preferences).toHaveLength(23);
+    expect(preferences).toHaveLength(27);
     expect(preferences.every((preference) => preference.channels.includes("in_app"))).toBe(
       true,
     );

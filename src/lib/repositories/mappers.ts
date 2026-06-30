@@ -1,10 +1,13 @@
 import type {
   Account,
+  AIInsight,
   BankConnection,
   Bill,
+  BudgetPeriod,
   Budget,
   AppNotification,
   Category,
+  Debt,
   ManualFinanceItem,
   MerchantRule,
   NotificationPreference,
@@ -28,9 +31,12 @@ type ManualFinanceItemRow =
 type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"];
 type CategoryRow = Database["public"]["Tables"]["categories"]["Row"];
 type BudgetRow = Database["public"]["Tables"]["budgets"]["Row"];
+type BudgetPeriodRow = Database["public"]["Tables"]["budget_periods"]["Row"];
 type BillRow = Database["public"]["Tables"]["bills"]["Row"];
 type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
 type SavingsGoalRow = Database["public"]["Tables"]["savings_goals"]["Row"];
+type DebtRow = Database["public"]["Tables"]["debts"]["Row"];
+type AIInsightRow = Database["public"]["Tables"]["ai_insights"]["Row"];
 type NotificationPreferenceRow =
   Database["public"]["Tables"]["notification_preferences"]["Row"];
 type AppNotificationRow = Database["public"]["Tables"]["app_notifications"]["Row"];
@@ -260,6 +266,17 @@ export function budgetFromRow(row: BudgetRow): Budget {
   };
 }
 
+export function budgetPeriodFromRow(row: BudgetPeriodRow): BudgetPeriod {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    label: row.label,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    status: row.status,
+  };
+}
+
 export function billFromRow(row: BillRow): Bill {
   return {
     id: row.id,
@@ -313,6 +330,69 @@ export function savingsGoalFromRow(row: SavingsGoalRow): SavingsGoal {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function debtFromRow(row: DebtRow): Debt {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    balance: row.balance,
+    currency: row.currency,
+    apr: row.apr,
+    minimumPayment: row.minimum_payment,
+    dueDate: row.due_date,
+    lender: row.lender,
+    accountId: row.account_id,
+    includeInNetWorth: row.include_in_net_worth,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function aiInsightFromRow(row: AIInsightRow): AIInsight {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type as AIInsight["type"],
+    mode: row.mode ?? undefined,
+    title: row.title,
+    summary: row.summary,
+    evidence: row.evidence,
+    assumptions: row.assumptions,
+    nextAction: row.next_action,
+    prompt: row.prompt ?? undefined,
+    redactedContextSummary: row.redacted_context_summary ?? undefined,
+    responseSummary: row.response_summary ?? undefined,
+    dataUsed: row.data_used as AIInsight["dataUsed"],
+    model: row.model ?? undefined,
+    errorStatus: row.error_status,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+export function aiInsightToRow(insight: AIInsight, userId: string): AIInsightRow {
+  return {
+    id: insight.id,
+    user_id: userId,
+    type: insight.type,
+    mode: insight.mode ?? null,
+    title: insight.title,
+    summary: insight.summary,
+    evidence: insight.evidence,
+    assumptions: insight.assumptions,
+    next_action: insight.nextAction,
+    prompt: insight.prompt ?? null,
+    redacted_context_summary: insight.redactedContextSummary ?? null,
+    response_summary: insight.responseSummary ?? null,
+    data_used: insight.dataUsed ?? {},
+    model: insight.model ?? null,
+    error_status: insight.errorStatus ?? null,
+    status: insight.status,
+    created_at: insight.createdAt,
   };
 }
 

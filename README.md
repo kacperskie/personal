@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 8B adds deterministic transaction enrichment, recurring payment detection, bills and subscription detection, cashflow forecasting, anomalies, and review workflows while keeping the app mock-compatible and privacy-first.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 9 adds the AI Money Coach using a server-only OpenAI Responses API integration, grounded in deterministic finance context with redaction, structured responses, audit records, and fallback summaries.
 
 ## Current Phase
 
-Phase 8B: transaction enrichment and recurring finance intelligence.
+Phase 9: AI Money Coach.
 
 Implemented locally:
 
@@ -33,6 +33,10 @@ Implemented locally:
 - Bills & Subscriptions page with confirmed bills, confirmed subscriptions, detected items needing review, estimates, confidence, price-change warnings, and payment-account context.
 - Dashboard intelligence cards for subscription total, review queue count, projected bills account balance, unusual spending warnings, and internal transfers excluded from spending.
 - Supabase migration and repository functions for merchant rules, transaction enrichments, recurring payment candidates, detected bills, detected subscriptions, spending anomalies, and cashflow events.
+- Server-only AI modules under `src/lib/ai` for OpenAI client access, money-coach orchestration, prompts, context building, guardrails, and redaction.
+- Authenticated `POST /api/ai/money-coach` route that builds finance context server-side, calls OpenAI only when configured, stores redacted AI insight metadata, creates audit events, and returns structured responses.
+- AI Coach page with mode selector, chat-style question box, suggested prompts, response cards, key numbers, assumptions, data used, loading states, and error fallback.
+- Dashboard money coach summary card with deterministic fallback plus "Ask why" and "View details" links.
 - Account-purpose default suggestions for American Express, Nationwide, and Revolut account patterns.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
@@ -94,6 +98,7 @@ supabase/migrations/20260702000000_phase5_notifications_pwa.sql
 supabase/migrations/20260703000000_phase7_moneyhub_sync.sql
 supabase/migrations/20260704000000_phase8a_event_driven_sync.sql
 supabase/migrations/20260705000000_phase8b_transaction_intelligence.sql
+supabase/migrations/20260706000000_phase9_ai_money_coach.sql
 ```
 
 When Supabase variables are missing, the app intentionally falls back to mock/local data so local UI and calculation work can continue without a database.
@@ -118,6 +123,10 @@ MONEYHUB_KEY_ID=
 OPEN_BANKING_PROVIDER_PAYLOAD_DEBUG=false
 PROVIDER_PAYLOAD_DEBUG_DIR=.debug/provider-payloads
 CRON_SECRET=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_ORG_ID=
+OPENAI_PROJECT_ID=
 ```
 
 Moneyhub sandbox setup requires a Moneyhub sandbox/API client, a registered redirect URL matching `MONEYHUB_REDIRECT_URI`, any required signing key material or key reference for the client configuration, webhook configuration in the provider admin portal, and Supabase configured for persistent sync testing.
@@ -254,6 +263,100 @@ Phase 8B notifications are in-app only and privacy-safe outside the authenticate
 
 Future AI enrichment should use the deterministic output as context and suggest explanations or category changes only. AI should not silently recategorise, change budgets, create rules, or alter reviewed decisions without explicit user confirmation.
 
+## AI Money Coach
+
+Phase 9 adds the AI Money Coach as an explanation and planning layer. Calculations remain deterministic in application code.
+
+Server-only modules:
+
+- `src/lib/ai/openai-client.ts`
+- `src/lib/ai/money-coach.ts`
+- `src/lib/ai/prompts.ts`
+- `src/lib/ai/context-builder.ts`
+- `src/lib/ai/guardrails.ts`
+- `src/lib/ai/redaction.ts`
+
+Required OpenAI placeholders:
+
+```bash
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_ORG_ID=
+OPENAI_PROJECT_ID=
+```
+
+OpenAI remains optional. Without `OPENAI_API_KEY`, the app uses a deterministic fallback summary and records an `openai_not_configured` AI insight/notification path when the authenticated route is used.
+
+Supported modes:
+
+- `monthly_review`
+- `weekly_review`
+- `payday_plan`
+- `can_i_afford_this`
+- `budget_explainer`
+- `bill_review`
+- `subscription_review`
+- `cashflow_review`
+- `debt_summary`
+- `net_worth_summary`
+- `anomaly_explainer`
+- `free_question`
+
+The finance context builder gathers summaries for account balances by purpose, safe-to-spend, bills before payday, upcoming bills and subscriptions, cashflow forecast, budget usage, savings goals, debts and liabilities, manual finance items, anomalies, recent transactions, reviewed transfer exclusions, and detected items needing review.
+
+Data minimisation rules:
+
+- Do not send provider access tokens.
+- Do not send refresh tokens.
+- Do not send bank login credentials.
+- Do not send full account numbers.
+- Do not send raw provider payloads.
+- Do not send unnecessary transaction-level history.
+- Redact provider IDs, connection IDs, account references, long identifiers, email addresses, token-like fields, and raw payload fields before AI use.
+- Prefer aggregated summaries and source counts; use deeper transaction context only for questions that need it.
+
+Structured AI responses include:
+
+- `answerSummary`
+- `keyNumbers`
+- `explanation`
+- `assumptions`
+- `risksOrWatchouts`
+- `suggestedNextActions`
+- `confidence`
+- `dataUsed`
+
+Guardrails:
+
+- Explain that calculations come from the deterministic finance engine.
+- Separate facts, assumptions, risks, and suggested actions.
+- Use calm UK-friendly wording.
+- Avoid regulated investment, pension transfer, mortgage, tax filing, and formal debt-solution advice.
+- Never tell the user to move money automatically.
+- Require explicit confirmation before external actions, provider changes, rules, emails, budget changes, or account changes.
+
+AI insight storage:
+
+- Uses the existing `ai_insights` table extended by `20260706000000_phase9_ai_money_coach.sql`.
+- Stores prompt summary, redacted context summary, response summary, data-used counts, model, mode, and error status.
+- Does not store full raw sensitive context unnecessarily.
+
+Cost and rate controls:
+
+- In-memory per-user hourly request limit placeholder.
+- Max context size guard before sending to OpenAI.
+- 20 second server-side timeout.
+- Safe fallback on OpenAI errors.
+
+Troubleshooting:
+
+- `OpenAI not configured`: set `OPENAI_API_KEY` and optionally `OPENAI_MODEL`.
+- `Sign in required`: the API route requires Supabase auth when called from the browser.
+- `AI response fallback`: check OpenAI credentials, model name, network access, and server logs without printing sensitive context.
+- `Missing data`: connect or sync accounts, review detected transactions, and keep manual entries current.
+
+The app provides personal finance coaching and explanations. Regulated advice areas remain educational and should be handled carefully before any broader product use.
+
 ## RLS Expectations
 
 All user-owned tables include `user_id` and have Row Level Security enabled. Policies only allow authenticated users to select, insert, update, or delete rows where `auth.uid() = user_id`.
@@ -358,6 +461,7 @@ Notification generation is deterministic in `src/lib/notifications.ts`:
 - Manual review when a manual item review date is due.
 - Safe-to-spend change when the value changes materially.
 - New detected bills, subscriptions, subscription price changes, missing expected bills, unusual spending, projected bills-account shortfalls, and transactions needing review.
+- AI monthly review ready, AI payday plan ready, AI review failed, and OpenAI not configured.
 
 Repository functions live in `src/lib/repositories/notification-repository.ts` and use Supabase when configured, with mock/local fallback otherwise.
 
@@ -496,6 +600,9 @@ Core domain types:
 - `DetectedSubscription`
 - `SpendingAnomaly`
 - `CashflowEvent`
+- `AIMoneyCoachMode`
+- `AIMoneyCoachResponse`
+- `AIDataUsedSummary`
 - `ManualFinanceItem`
 
 Account purposes:

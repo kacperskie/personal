@@ -3,6 +3,7 @@ import type {
   AccountRole,
   AccountSubtype,
   AccountType,
+  AIMoneyCoachMode,
   BankProvider,
   CategoryKind,
   ConnectionLifecycleStatus,
@@ -687,6 +688,78 @@ export type Database = {
           source: "bill" | "subscription" | "manual" | "income";
         };
         Update: Partial<Database["public"]["Tables"]["cashflow_events"]["Row"]>;
+        Relationships: [];
+      };
+      debts: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          balance: number;
+          currency: CurrencyCode;
+          apr: number;
+          minimum_payment: number;
+          due_date: string;
+          lender: string;
+          account_id: string | null;
+          include_in_net_worth: boolean;
+          status: EntityStatus;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["debts"]["Row"]> & {
+          user_id: string;
+          name: string;
+          balance: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["debts"]["Row"]>;
+        Relationships: [];
+      };
+      net_worth_snapshots: {
+        Row: {
+          id: string;
+          user_id: string;
+          date: string;
+          assets_total: number;
+          liabilities_total: number;
+          net_worth: number;
+          currency: CurrencyCode;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["net_worth_snapshots"]["Row"]> & {
+          user_id: string;
+          date: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["net_worth_snapshots"]["Row"]>;
+        Relationships: [];
+      };
+      ai_insights: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: string;
+          mode: AIMoneyCoachMode | null;
+          title: string;
+          summary: string;
+          evidence: string[];
+          assumptions: string[];
+          next_action: string;
+          prompt: string | null;
+          redacted_context_summary: string | null;
+          response_summary: string | null;
+          data_used: Json;
+          model: string | null;
+          error_status: string | null;
+          status: EntityStatus;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["ai_insights"]["Row"]> & {
+          user_id: string;
+          type: string;
+          title: string;
+          summary: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["ai_insights"]["Row"]>;
         Relationships: [];
       };
       audit_log: {

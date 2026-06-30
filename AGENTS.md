@@ -22,6 +22,7 @@ Use mock/local data first, then direct account connection through Open Banking a
 - Keep financial calculations deterministic in code.
 - Keep transaction enrichment deterministic-first: merchant normalisation, categorisation, transfer detection, recurring detection, cashflow forecasts, and anomalies must be explainable and testable before AI suggestions are added.
 - Use AI for explanation, summarisation, categorisation suggestions, and scenario narration.
+- Keep OpenAI access server-side only. Never expose `OPENAI_API_KEY`, organisation IDs, project IDs, prompts with sensitive context, or raw AI request payloads to browser code.
 - Never hard-code real financial data.
 - Never store bank login credentials.
 - Never expose provider tokens to browser code.
@@ -74,6 +75,16 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Recurring bills and subscriptions are candidates until reviewed or approved; do not silently convert review candidates into user decisions.
 - Preserve user-reviewed merchant, category, notes, transfer, and spending-exclusion decisions during repeat provider sync and enrichment runs.
 - Do not log unnecessary transaction detail while enriching, detecting anomalies, or generating review workflows.
+- Phase 9 AI Money Coach must remain an explanation/planning layer over deterministic finance calculations.
+- AI context must be built server-side from repository functions and deterministic helpers; do not accept client-supplied finance context.
+- AI context should use summaries by default and include transaction-level samples only for questions that genuinely need deeper context.
+- Redact provider tokens, refresh tokens, credentials, raw provider payloads, full account numbers, provider IDs, connection IDs, account references, email addresses, and long token-like strings before AI use.
+- Store only redacted context summaries and response summaries in `ai_insights`; do not store full raw sensitive AI context unnecessarily.
+- AI responses must use the structured money-coach response format: `answerSummary`, `keyNumbers`, `explanation`, `assumptions`, `risksOrWatchouts`, `suggestedNextActions`, `confidence`, and `dataUsed`.
+- AI should explain that calculations come from the deterministic finance engine and must separate facts, assumptions, risks, and suggested actions.
+- AI must avoid regulated investment advice, pension transfer advice, mortgage advice, tax filing advice, and formal debt-solution advice.
+- AI must not move money, connect external accounts, create rules, draft/send external messages, or change budgets without explicit user confirmation.
+- OpenAI must stay optional; when it is not configured, show deterministic fallback summaries and safe errors.
 - Production token storage should use encrypted storage or provider-managed token vaulting where available.
 - Provider API routes must require authentication, write audit events, return provider-safe errors, and never expose tokens.
 - Do not add production Open Banking API calls, real provider credentials, real token persistence, or token logging without a security review.
@@ -87,6 +98,7 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Keep notification copy shown outside the app privacy-safe by default. Avoid amounts, bank names, account names, and detailed financial facts in browser notification text.
 - Transaction notification copy shown outside the app must stay generic, such as "New transaction detected", "Transaction updated", "Potential duplicate payment", or "Account connection needs attention".
 - Phase 8B intelligence notification copy shown outside the app must stay generic, such as "Bill detected", "Subscription detected", "Subscription price changed", "Expected payment needs review", "Unusual spending detected", or "Transaction needs review".
+- AI notification copy shown outside the app must stay generic, such as "Money coach review ready", "Payday plan ready", "Money coach needs attention", or "Money coach unavailable".
 - Detailed notification content may appear only inside the authenticated app.
 - Treat push subscription records as sensitive and avoid exposing endpoint internals in UI or logs.
 

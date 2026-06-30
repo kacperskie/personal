@@ -462,6 +462,52 @@ export type CashflowEvent = {
   updatedAt: string;
 };
 
+export type AIMoneyCoachMode =
+  | "monthly_review"
+  | "weekly_review"
+  | "payday_plan"
+  | "can_i_afford_this"
+  | "budget_explainer"
+  | "bill_review"
+  | "subscription_review"
+  | "cashflow_review"
+  | "debt_summary"
+  | "net_worth_summary"
+  | "anomaly_explainer"
+  | "free_question";
+
+export type AIMoneyCoachConfidence = "low" | "medium" | "high";
+
+export type AIKeyNumber = {
+  label: string;
+  value: string;
+  source: string;
+};
+
+export type AIDataUsedSummary = {
+  accounts: number;
+  transactions: number;
+  budgets: number;
+  bills: number;
+  subscriptions: number;
+  savingsGoals: number;
+  debts: number;
+  manualItems: number;
+  anomalies: number;
+  dateRange: string;
+};
+
+export type AIMoneyCoachResponse = {
+  answerSummary: string;
+  keyNumbers: AIKeyNumber[];
+  explanation: string[];
+  assumptions: string[];
+  risksOrWatchouts: string[];
+  suggestedNextActions: string[];
+  confidence: AIMoneyCoachConfidence;
+  dataUsed: AIDataUsedSummary;
+};
+
 export type BudgetPeriod = {
   id: string;
   userId: string;
@@ -563,12 +609,19 @@ export type NetWorthSnapshot = {
 export type AIInsight = {
   id: string;
   userId: string;
-  type: "monthly_review" | "weekly_review" | "affordability" | "budget_note";
+  type: AIMoneyCoachMode | "affordability" | "budget_note";
+  mode?: AIMoneyCoachMode;
   title: string;
   summary: string;
   evidence: string[];
   assumptions: string[];
   nextAction: string;
+  prompt?: string;
+  redactedContextSummary?: string;
+  responseSummary?: string;
+  dataUsed?: AIDataUsedSummary;
+  model?: string;
+  errorStatus?: string | null;
   status: EntityStatus;
   createdAt: string;
 };
@@ -614,6 +667,10 @@ export type NotificationType =
   | "unusual_spending"
   | "projected_bills_account_shortfall"
   | "transaction_needs_review"
+  | "ai_monthly_review_ready"
+  | "ai_payday_plan_ready"
+  | "ai_review_failed"
+  | "openai_not_configured"
   | "payday_planning"
   | "manual_item_review"
   | "safe_to_spend_change";
