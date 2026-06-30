@@ -39,9 +39,14 @@ describe("phase 12B Netlify staging deployment", () => {
       CONTEXT: "deploy-preview",
       URL: "https://finance-hq-staging.netlify.app",
       SITE_NAME: "finance-hq-staging",
-      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-public",
-      SUPABASE_SERVICE_ROLE_KEY: "service-role-secret-value",
+      BACKEND_PROVIDER: "firebase",
+      NEXT_PUBLIC_FIREBASE_API_KEY: "firebase-public-key",
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "finance-hq.firebaseapp.com",
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: "finance-hq",
+      NEXT_PUBLIC_FIREBASE_APP_ID: "firebase-app-id",
+      FIREBASE_PROJECT_ID: "finance-hq",
+      FIREBASE_CLIENT_EMAIL: "firebase-admin@example.iam.gserviceaccount.com",
+      FIREBASE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nfirebase-secret\\n-----END PRIVATE KEY-----\\n",
       CRON_SECRET: "cron-secret-value",
       MOCK_DATA_FALLBACK_ENABLED: "true",
       OPEN_BANKING_PROVIDER: "mock",
@@ -137,8 +142,8 @@ describe("phase 12B Netlify staging deployment", () => {
     expect(netlifyDoc).toContain("primary staging deployment path");
     expect(netlifyDoc).toContain("TrueLayer");
     expect(netlifyDoc).toContain("Moneyhub");
-    expect(readme).toContain("Netlify the primary staging deployment path");
-    expect(readme).toContain("Vercel remains supported as a secondary option");
-    expect(checklist).toContain("Netlify is the primary staging deployment path");
+    expect(readme).toContain("Netlify + Firebase the primary free");
+    expect(readme).toContain("Vercel remains supported as a secondary deployment option");
+    expect(checklist).toContain("Netlify + Firebase is the primary free staging path");
   });
 });

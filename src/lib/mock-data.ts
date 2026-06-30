@@ -11,6 +11,8 @@ import type {
   ManualFinanceItem,
   NetWorthSnapshot,
   AppNotification,
+  OverdraftPlan,
+  PaydayPlan,
   SavingsGoal,
   NotificationPreference,
   NotificationRule,
@@ -1561,3 +1563,110 @@ export const bankConnectionsWithDisplayStatus = mockBankConnections.map((connect
   ...connection,
   displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
 }));
+
+// ---------------------------------------------------------------------------
+// v2 finance engine mock data (synthetic, GBP, no real financial data).
+// Exercises payday planning, overdraft escape, debt freedom and savings phases.
+// ---------------------------------------------------------------------------
+
+export const mockPaydayPlans: PaydayPlan[] = [
+  {
+    id: "payday_plan_primary",
+    userId,
+    monthlyIncome: 2600,
+    paydayDate: "2026-07-25",
+    preferredBuffer: 350,
+    billsAccountTarget: 1100,
+    minimumDebtPaymentsTarget: 320,
+    overdraftReductionTarget: 150,
+    essentialSpendingTarget: 500,
+    emergencyBufferTarget: 100,
+    savingsTarget: 200,
+    flexibleSpendingTarget: 230,
+    createdAt,
+    updatedAt: createdAt,
+  },
+];
+
+export const mockPaydayPlan = mockPaydayPlans[0];
+
+export const mockOverdraftPlans: OverdraftPlan[] = [
+  {
+    id: "overdraft_plan_flexdirect",
+    userId,
+    linkedAccountId: "acct_nationwide_current",
+    overdraftLimit: 1000,
+    currentOverdraftUsed: 600,
+    targetReductionPerPayday: 150,
+    feesOrInterest: 18.9,
+    targetOverdraftFreeDate: "2026-12-25",
+    projectedOverdraftFreeDate: null,
+    riskBeforePayday: "medium",
+    recommendedPaydayAction:
+      "Reduce the overdraft by at least £150.00 this payday.",
+    status: "active",
+    createdAt,
+    updatedAt: createdAt,
+  },
+];
+
+export const mockOverdraftPlan = mockOverdraftPlans[0];
+
+/**
+ * Synthetic debts with distinct balances, APRs and custom priorities so debt
+ * strategy ordering (snowball / avalanche / custom) is unambiguous in tests.
+ * Kept separate from {@link mockDebts} so existing finance fixtures are stable.
+ */
+export const mockStrategyDebts: Debt[] = [
+  {
+    id: "debt_store_card",
+    userId,
+    name: "Store card",
+    balance: 450,
+    currency: "GBP",
+    apr: 12.0,
+    minimumPayment: 25,
+    dueDate: "2026-07-12",
+    lender: "Mock Store Finance",
+    accountId: null,
+    includeInNetWorth: true,
+    priority: 2,
+    status: "active",
+    createdAt,
+    updatedAt: createdAt,
+  },
+  {
+    id: "debt_credit_card",
+    userId,
+    name: "Credit card",
+    balance: 2100,
+    currency: "GBP",
+    apr: 21.9,
+    minimumPayment: 75,
+    dueDate: "2026-07-20",
+    lender: "Mock Bank Cards",
+    accountId: null,
+    includeInNetWorth: true,
+    priority: 3,
+    status: "active",
+    createdAt,
+    updatedAt: createdAt,
+  },
+  {
+    id: "debt_car_finance",
+    userId,
+    name: "Car finance",
+    balance: 5200,
+    currency: "GBP",
+    apr: 9.4,
+    minimumPayment: 210,
+    dueDate: "2026-07-28",
+    lender: "Mock Motor Finance",
+    accountId: null,
+    includeInNetWorth: true,
+    priority: 1,
+    status: "active",
+    createdAt,
+    updatedAt: createdAt,
+  },
+];

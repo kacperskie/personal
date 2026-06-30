@@ -1,14 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import type { Database } from "@/lib/supabase/database.types";
+import { getBackendProvider } from "@/lib/backend/provider";
+import { firebaseSessionCookieName } from "@/lib/firebase/constants";
 
-const publicRoutes = ["/sign-in", "/auth/callback"];
+const publicRoutes = ["/sign-in", "/api/auth/firebase-session"];
 
 export async function middleware(request: NextRequest) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const backendProvider = getBackendProvider();
 
-  if (!supabaseUrl || !supabaseAnonKey) {
+  // Mock mode is open; no authentication is required for the demo workspace.
+  if (backendProvider === "mock") {
     return NextResponse.next();
   }
 
@@ -16,37 +16,15 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  let response = NextResponse.next({
-    request,
-  });
-
-  const supabase = createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options);
-        });
-      },
-    },
-  });
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/sign-in";
-    redirectUrl.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(redirectUrl);
+  // Firebase: require a session cookie, otherwise redirect to sign-in.
+  if (request.cookies.has(firebaseSessionCookieName)) {
+    return NextResponse.next();
   }
 
-  return response;
+  const redirectUrl = request.nextUrl.clone();
+  redirectUrl.pathname = "/sign-in";
+  redirectUrl.searchParams.set("next", request.nextUrl.pathname);
+  return NextResponse.redirect(redirectUrl);
 }
 
 export const config = {

@@ -1,19 +1,27 @@
 import Link from "next/link";
-import { Activity, Cable, ShieldCheck, ToggleLeft } from "lucide-react";
+import { Activity, Cable, ClipboardList, ShieldCheck, ToggleLeft } from "lucide-react";
 import { NotificationPreferencesManager } from "@/components/notifications/notification-preferences-manager";
 import { PageHeader } from "@/components/page-header";
 import { InstallGuidance } from "@/components/pwa/install-guidance";
 import { SignOutButton } from "@/components/sign-out-button";
 import { getClientWebPushConfig } from "@/lib/notifications/web-push";
 import { getNotificationPreferences } from "@/lib/repositories/notification-repository";
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { getBackendProvider } from "@/lib/backend/provider";
+import { isFirebaseBackendConfigured } from "@/lib/firebase/env";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const supabaseConfigured = isSupabaseConfigured();
+  const backendProvider = getBackendProvider();
+  const firebaseConfigured = isFirebaseBackendConfigured();
   const notificationPreferences = await getNotificationPreferences();
   const webPush = getClientWebPushConfig();
+  const persistenceStatus =
+    backendProvider === "firebase"
+      ? firebaseConfigured
+        ? "Firebase Auth and Firestore are configured for the Netlify free path."
+        : "Firebase is selected but not fully configured, so mock fallback remains important."
+      : "Mock data mode is selected, so no persistent backend is required.";
 
   return (
     <div className="space-y-6">
@@ -43,11 +51,24 @@ export default async function SettingsPage() {
           <ShieldCheck className="h-5 w-5 text-teal" aria-hidden="true" />
           <h2 className="mt-4 text-base font-semibold text-ink">Data mode</h2>
           <p className="mt-2 text-sm leading-6 text-ink/70">
-            {supabaseConfigured
-              ? "Supabase persistence is configured. Real provider credentials and access tokens are still disabled."
-              : "Supabase is not configured, so this build is using local mock seed data only."}
+            {persistenceStatus}
           </p>
-          {supabaseConfigured ? <div className="mt-4"><SignOutButton /></div> : null}
+          {backendProvider !== "mock" ? <div className="mt-4"><SignOutButton /></div> : null}
+        </article>
+
+        <article className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <ClipboardList className="h-5 w-5 text-teal" aria-hidden="true" />
+          <h2 className="mt-4 text-base font-semibold text-ink">Setup wizard</h2>
+          <p className="mt-2 text-sm leading-6 text-ink/70">
+            Convert the old Google Sheets-style tracker into accounts, bills,
+            subscriptions, manual entries, goals, debts, and review preferences.
+          </p>
+          <Link
+            href="/setup"
+            className="mt-4 inline-flex rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+          >
+            Open setup
+          </Link>
         </article>
 
         <article className="rounded-lg border border-line bg-white p-5 shadow-panel">
@@ -79,8 +100,8 @@ export default async function SettingsPage() {
           <Activity className="h-5 w-5 text-teal" aria-hidden="true" />
           <h2 className="mt-4 text-base font-semibold text-ink">System readiness</h2>
           <p className="mt-2 text-sm leading-6 text-ink/70">
-            Review safe staging checks for Supabase, Moneyhub sandbox, OpenAI, Web Push,
-            cron protection, redirects, and webhook setup.
+            Review safe staging checks for Firebase, Firestore, TrueLayer sandbox, OpenAI,
+            Web Push, cron protection, redirects, and webhook setup.
           </p>
           <Link
             href="/settings/system-readiness"

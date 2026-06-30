@@ -590,6 +590,11 @@ export type Debt = {
   lender: string;
   accountId: string | null;
   includeInNetWorth: boolean;
+  /**
+   * Optional manual priority used by the "custom" debt strategy. Lower numbers
+   * are attacked first. Optional so existing Supabase/mock data stays valid.
+   */
+  priority?: number | null;
   status: EntityStatus;
   createdAt: string;
   updatedAt: string;
@@ -797,4 +802,151 @@ export type ManualFinanceItem = {
   reviewDate: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+// ---------------------------------------------------------------------------
+// v2 finance engine models (payday planning, overdraft escape, debt freedom,
+// bills-account funding, savings phases, next best action).
+// These are deterministic, GBP-only, and contain no real financial data.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stored payday plan: the income and the seven ordered allocation targets the
+ * deterministic waterfall fills on payday. Targets are gross monthly amounts.
+ */
+export type PaydayPlan = {
+  id: string;
+  userId: string;
+  monthlyIncome: number;
+  paydayDate: string;
+  preferredBuffer: number;
+  billsAccountTarget: number;
+  minimumDebtPaymentsTarget: number;
+  overdraftReductionTarget: number;
+  essentialSpendingTarget: number;
+  emergencyBufferTarget: number;
+  savingsTarget: number;
+  flexibleSpendingTarget: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Computed result of running the payday waterfall against income and targets.
+ * Not persisted on its own; derived from a {@link PaydayPlan} or ad-hoc input.
+ */
+export type PaydayAllocation = {
+  income: number;
+  billsAccountAllocation: number;
+  minimumDebtPaymentsAllocation: number;
+  overdraftReductionAllocation: number;
+  essentialSpendingAllocation: number;
+  emergencyBufferAllocation: number;
+  savingsAllocation: number;
+  flexibleSpendingAllocation: number;
+  leftover: number;
+  shortfall: number;
+  warnings: string[];
+};
+
+export type OverdraftRiskLevel = "none" | "low" | "medium" | "high";
+
+export type OverdraftPlanStatus =
+  | "active"
+  | "overdraft_free"
+  | "paused"
+  | "archived";
+
+/**
+ * Stored overdraft escape plan for a single account.
+ * `currentOverdraftUsed` is a positive number representing how much of the
+ * overdraft facility is currently drawn (0 = not in overdraft).
+ */
+export type OverdraftPlan = {
+  id: string;
+  userId: string;
+  linkedAccountId: string;
+  overdraftLimit: number;
+  currentOverdraftUsed: number;
+  targetReductionPerPayday: number;
+  feesOrInterest: number | null;
+  targetOverdraftFreeDate: string | null;
+  projectedOverdraftFreeDate: string | null;
+  riskBeforePayday: OverdraftRiskLevel;
+  recommendedPaydayAction: string;
+  status: OverdraftPlanStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DebtStrategy = "snowball" | "avalanche" | "custom";
+
+export type OrderedDebt = {
+  id: string;
+  name: string;
+  balance: number;
+  minimumPayment: number;
+  apr: number | null;
+  priority: number | null;
+  payoffOrder: number;
+  source: "debt" | "manual";
+};
+
+export type DebtFreedomSummary = {
+  totalDebt: number;
+  totalMinimumPayments: number;
+  extraPaymentAvailable: number;
+  selectedStrategy: DebtStrategy;
+  nextDebtToAttack: OrderedDebt | null;
+  projectedDebtFreeDate: string | null;
+  orderedDebts: OrderedDebt[];
+  warnings: string[];
+};
+
+export type BillsAccountSummary = {
+  billsAccountId: string | null;
+  billsAccountBalance: number;
+  billsDueBeforePayday: number;
+  expectedShortfall: number;
+  expectedSurplus: number;
+  paydayTransferRequired: number;
+  isFullyFunded: boolean;
+  warnings: string[];
+};
+
+export type SavingsPhase =
+  | "starter_emergency_buffer"
+  | "overdraft_free"
+  | "emergency_fund"
+  | "debt_free"
+  | "one_month_essential_expenses";
+
+export type SavingsPhaseSummary = {
+  currentPhase: SavingsPhase;
+  nextPhase: SavingsPhase | null;
+  currentSavings: number;
+  targetAmount: number;
+  progressPercentage: number;
+  recommendedAction: string;
+};
+
+export type NextBestActionType =
+  | "fund_bills_account"
+  | "address_overdraft_risk"
+  | "pay_debt_due"
+  | "raise_safe_to_spend"
+  | "reduce_overdraft"
+  | "overpay_debt"
+  | "contribute_emergency_buffer"
+  | "contribute_savings_goal"
+  | "all_clear";
+
+export type NextBestAction = {
+  type: NextBestActionType;
+  title: string;
+  description: string;
+  amount: number | null;
+  priority: number;
+  reason: string;
+  relatedEntityId: string | null;
 };

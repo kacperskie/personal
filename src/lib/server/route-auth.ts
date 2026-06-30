@@ -1,22 +1,40 @@
 import { NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getBackendProvider } from "@/lib/backend/provider";
+import { getFirebaseSessionUser } from "@/lib/firebase/session";
 
-export async function requireAuthenticatedRouteUser() {
-  const supabase = await createSupabaseServerClient();
+export type AuthenticatedRouteUser = {
+  user: {
+    id: string;
+    email: string | null;
+    user_metadata: { display_name: string | null };
+  };
+};
 
-  if (!supabase) {
+/**
+ * Resolve the authenticated user for API routes. Firebase is the only primary
+ * auth backend; mock mode has no authenticated user (protected API routes are
+ * not part of the mock demo path).
+ */
+export async function requireAuthenticatedRouteUser(): Promise<AuthenticatedRouteUser | null> {
+  if (getBackendProvider() !== "firebase") {
     return null;
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getFirebaseSessionUser();
 
   if (!user) {
     return null;
   }
 
-  return { supabase, user };
+  return {
+    user: {
+      id: user.uid,
+      email: user.email ?? null,
+      user_metadata: {
+        display_name: user.name ?? null,
+      },
+    },
+  };
 }
 
 export function unauthenticatedResponse() {

@@ -25,9 +25,14 @@ describe("phase 11 staging readiness", () => {
       NETLIFY: "true",
       CONTEXT: "deploy-preview",
       URL: "https://staging.example.com",
-      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-public",
-      SUPABASE_SERVICE_ROLE_KEY: "service-role-secret-value",
+      BACKEND_PROVIDER: "firebase",
+      NEXT_PUBLIC_FIREBASE_API_KEY: "firebase-public-key",
+      NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "finance-hq.firebaseapp.com",
+      NEXT_PUBLIC_FIREBASE_PROJECT_ID: "finance-hq",
+      NEXT_PUBLIC_FIREBASE_APP_ID: "firebase-app-id",
+      FIREBASE_PROJECT_ID: "finance-hq",
+      FIREBASE_CLIENT_EMAIL: "firebase-admin@example.iam.gserviceaccount.com",
+      FIREBASE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nfirebase-secret\\n-----END PRIVATE KEY-----\\n",
       OPENAI_API_KEY: "openai-secret-value",
       MONEYHUB_CLIENT_ID: "client-id",
       MONEYHUB_CLIENT_SECRET: "moneyhub-secret-value",
@@ -49,11 +54,14 @@ describe("phase 11 staging readiness", () => {
     const serialised = JSON.stringify(report);
 
     expect(report.overallStatus).toBe("pass");
-    expect(serialised).not.toContain("service-role-secret-value");
+    expect(serialised).not.toContain("firebase-secret");
+    expect(serialised).not.toContain("-----BEGIN PRIVATE KEY-----");
     expect(serialised).not.toContain("openai-secret-value");
     expect(serialised).not.toContain("moneyhub-secret-value");
     expect(serialised).not.toContain("private-vapid-secret-value");
     expect(serialised).not.toContain("cron-secret-value");
+    // No Supabase item should appear as a primary failed readiness check.
+    expect(report.checks.some((entry) => entry.label.includes("Supabase"))).toBe(false);
     expect(assertNoSecretValuesInReadinessReport(report)).toBe(true);
   });
 
@@ -95,7 +103,8 @@ describe("phase 11 staging readiness", () => {
     } as unknown as NodeJS.ProcessEnv);
 
     expect(validation.deploymentEnvironment).toBe("staging");
-    expect(validation.missingRequiredForStaging).toContain("Supabase URL");
+    expect(validation.missingRequiredForStaging).not.toContain("Supabase URL");
+    expect(validation.missingRequiredForStaging).toContain("Application base URL");
     expect(validation.missingRequiredForStaging).toContain("Cron secret");
   });
 

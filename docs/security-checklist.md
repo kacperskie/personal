@@ -4,10 +4,11 @@ Use this checklist before staging and before any wider production use.
 
 ## Secrets Handling
 
-- Store Supabase, Moneyhub, TrueLayer, OpenAI, VAPID and cron secrets only in deployment environment variables.
+- Store Firebase Admin, TrueLayer, OpenAI, VAPID and cron secrets only in deployment environment variables.
 - Do not commit `.env.local` or real credentials.
 - Expose only client-safe public keys to browser code.
 - Confirm readiness pages do not show secret names or secret values unnecessarily.
+- Never expose `FIREBASE_PRIVATE_KEY` or `FIREBASE_CLIENT_EMAIL` to browser code.
 
 ## Provider Token Boundary
 
@@ -24,12 +25,18 @@ Use this checklist before staging and before any wider production use.
 - Store only redacted context summaries and response summaries.
 - Keep regulated advice topics educational and signposted.
 
-## Supabase RLS
+## Supabase (removed)
 
-- Every user-owned table must include `user_id`.
-- RLS must be enabled on all user-owned tables.
-- Policies must restrict select, insert, update and delete to `auth.uid() = user_id`.
-- Service role usage must stay server-side.
+- Supabase has been removed from the primary path. No Supabase RLS or service-role
+  configuration is required. Do not set Supabase environment variables.
+
+## Firebase Rules
+
+- Use `BACKEND_PROVIDER=firebase` only with Firebase Auth and Firestore rules deployed.
+- Keep Firestore data under `users/{userId}` and nested user-owned collections.
+- Rules must restrict reads and writes to `request.auth.uid == userId`.
+- Firebase Admin usage must stay server-side.
+- Push subscriptions and provider metadata in Firestore remain sensitive.
 
 ## Push Subscription Sensitivity
 
@@ -55,7 +62,7 @@ Use this checklist before staging and before any wider production use.
 
 ## Backup And Recovery
 
-- Confirm Supabase backups are enabled for staging/production.
+- Confirm Firebase export/backup expectations for Firestore before relying on it for staging data.
 - Test restore before private beta.
 - Document rollback for migrations and deployment changes.
 

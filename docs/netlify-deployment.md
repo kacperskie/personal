@@ -1,6 +1,6 @@
 # Netlify Deployment
 
-Netlify is the primary staging deployment path for Personal Finance HQ. Vercel remains supported as a secondary option through `vercel.json`.
+Netlify + Firebase is the primary free staging deployment path for Personal Finance HQ. Netlify remains the primary staging deployment path, and Vercel remains supported as a secondary deployment option. Supabase has been removed from the primary path; TrueLayer sandbox and OpenAI remain optional and disabled by default.
 
 Use fake/demo data only in staging. Do not commit credentials or real financial data.
 
@@ -15,12 +15,17 @@ Use fake/demo data only in staging. Do not commit credentials or real financial 
 
 ## Environment Variables
 
-Required for basic staging:
+Required for basic Netlify + Firebase staging:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+BACKEND_PROVIDER=firebase
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
 APP_BASE_URL=
 CRON_SECRET=
 MOCK_DATA_FALLBACK_ENABLED=true
@@ -68,11 +73,25 @@ MONEYHUB_AUTH_BASE_URL=https://identity.moneyhub.co.uk
 
 Keep `SUPABASE_SERVICE_ROLE_KEY`, provider client secrets, `OPENAI_API_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `CRON_SECRET` server-side only in Netlify environment variables.
 
-## Supabase Setup
+Keep `FIREBASE_PRIVATE_KEY` and `FIREBASE_CLIENT_EMAIL` server-side only. Do not expose Firebase Admin credentials to browser code.
 
-- Apply migrations with `supabase db push`.
-- Add the Netlify staging URL to Supabase Auth allowed redirect URLs.
-- Add `https://your-netlify-site.netlify.app/auth/callback`.
+## Firebase Setup
+
+- Create a Firebase project.
+- Enable Firebase Authentication with email/password.
+- Create a Web App and copy the `NEXT_PUBLIC_FIREBASE_*` values into Netlify.
+- Create a Firebase Admin service account and store `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` in Netlify environment variables.
+- Deploy `firebase/firestore.rules` from a trusted local Firebase CLI session.
+- Add the Netlify staging domain to Firebase Auth authorized domains.
+- Review `docs/firebase-schema.md` before seeding fake demo data.
+
+Use `BACKEND_PROVIDER=firebase` for the free path, or `BACKEND_PROVIDER=mock` for a no-backend demo.
+
+## Supabase (removed)
+
+Supabase has been removed from the primary path in v2. `BACKEND_PROVIDER=supabase`
+now degrades safely to mock. Do not set Supabase variables for the Firebase free
+deployment. Legacy `supabase/migrations/*` remain only as archived references.
 - Confirm sign-in, sign-out, and protected route redirects.
 - Keep RLS enabled on all user-owned tables.
 
@@ -137,7 +156,8 @@ Also visit `/settings/system-readiness` and confirm:
 
 - Platform shows Netlify.
 - App base URL is configured.
-- Supabase status is correct.
+- No Supabase item appears as a primary failed check.
+- Firebase client/admin and Firestore status are correct when `BACKEND_PROVIDER=firebase`.
 - OpenAI, Web Push, and Open Banking statuses are safely enabled or disabled.
 - Scheduled job support is shown.
 - No secret values are rendered.
@@ -152,7 +172,7 @@ Also visit `/settings/system-readiness` and confirm:
 ## Troubleshooting
 
 - Build fails: confirm Node version, `npm run build`, and the Netlify Next.js plugin.
-- Auth redirect fails: confirm Supabase Auth URLs include the Netlify staging URL.
+- Auth redirect fails: confirm the Netlify staging domain is in Firebase Auth authorized domains.
 - Scheduled functions fail: confirm `APP_BASE_URL` and `CRON_SECRET`.
 - TrueLayer callback fails: confirm `TRUELAYER_REDIRECT_URI` exactly matches the provider portal.
 - Moneyhub callback fails: confirm `MONEYHUB_REDIRECT_URI` exactly matches the provider portal.

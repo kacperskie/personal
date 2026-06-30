@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getBackendProvider, type BackendProvider } from "@/lib/backend/provider";
+
 export type DeploymentEnvironment = "local" | "staging" | "production";
 export type DeploymentPlatform = "netlify" | "vercel" | "local" | "unknown";
 
@@ -16,6 +18,7 @@ export type FeatureFlags = {
 export type EnvironmentValidation = {
   deploymentEnvironment: DeploymentEnvironment;
   deploymentPlatform: DeploymentPlatform;
+  backendProvider: BackendProvider;
   appBaseUrl: string | null;
   netlify: {
     context: string | null;
@@ -26,10 +29,17 @@ export type EnvironmentValidation = {
   publicClientSafe: {
     supabaseUrlConfigured: boolean;
     supabaseAnonKeyConfigured: boolean;
+    firebaseApiKeyConfigured: boolean;
+    firebaseAuthDomainConfigured: boolean;
+    firebaseProjectIdConfigured: boolean;
+    firebaseAppIdConfigured: boolean;
     webPushPublicKeyConfigured: boolean;
   };
   serverOnly: {
     supabaseServiceRoleConfigured: boolean;
+    firebaseAdminConfigured: boolean;
+    firebaseClientEmailConfigured: boolean;
+    firebasePrivateKeyConfigured: boolean;
     openAiConfigured: boolean;
     moneyhubSandboxConfigured: boolean;
     truelayerSandboxConfigured: boolean;
@@ -110,6 +120,7 @@ export function validateDeploymentEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): EnvironmentValidation {
   const flags = getFeatureFlags(env);
+  const backendProvider = getBackendProvider(env);
   const appBaseUrl =
     normaliseUrl(env.NEXT_PUBLIC_APP_BASE_URL) ??
     normaliseUrl(env.APP_BASE_URL) ??
@@ -136,6 +147,7 @@ export function validateDeploymentEnvironment(
   const validation: EnvironmentValidation = {
     deploymentEnvironment: deploymentEnvironment(env),
     deploymentPlatform: detectDeploymentPlatform(env),
+    backendProvider,
     appBaseUrl,
     netlify: {
       context: env.CONTEXT ?? null,
@@ -146,10 +158,23 @@ export function validateDeploymentEnvironment(
     publicClientSafe: {
       supabaseUrlConfigured: Boolean(env.NEXT_PUBLIC_SUPABASE_URL),
       supabaseAnonKeyConfigured: Boolean(env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+      firebaseApiKeyConfigured: Boolean(env.NEXT_PUBLIC_FIREBASE_API_KEY),
+      firebaseAuthDomainConfigured: Boolean(env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
+      firebaseProjectIdConfigured: Boolean(
+        env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? env.FIREBASE_PROJECT_ID,
+      ),
+      firebaseAppIdConfigured: Boolean(env.NEXT_PUBLIC_FIREBASE_APP_ID),
       webPushPublicKeyConfigured: Boolean(env.WEB_PUSH_VAPID_PUBLIC_KEY),
     },
     serverOnly: {
       supabaseServiceRoleConfigured: Boolean(env.SUPABASE_SERVICE_ROLE_KEY),
+      firebaseAdminConfigured: Boolean(
+        (env.FIREBASE_PROJECT_ID || env.NEXT_PUBLIC_FIREBASE_PROJECT_ID) &&
+          env.FIREBASE_CLIENT_EMAIL &&
+          env.FIREBASE_PRIVATE_KEY,
+      ),
+      firebaseClientEmailConfigured: Boolean(env.FIREBASE_CLIENT_EMAIL),
+      firebasePrivateKeyConfigured: Boolean(env.FIREBASE_PRIVATE_KEY),
       openAiConfigured: Boolean(env.OPENAI_API_KEY),
       moneyhubSandboxConfigured,
       truelayerSandboxConfigured,
@@ -160,12 +185,21 @@ export function validateDeploymentEnvironment(
     missingRequiredForStaging: [],
   };
   const requiredForStaging: Array<[string, boolean]> = [
-    ["Supabase URL", validation.publicClientSafe.supabaseUrlConfigured],
-    ["Supabase anon key", validation.publicClientSafe.supabaseAnonKeyConfigured],
-    ["Supabase service role key", validation.serverOnly.supabaseServiceRoleConfigured],
     ["Application base URL", Boolean(validation.appBaseUrl)],
     ["Cron secret", validation.serverOnly.cronSecretConfigured],
   ];
+
+  if (backendProvider === "firebase") {
+    requiredForStaging.push(
+      ["Firebase public client configuration", Boolean(
+        validation.publicClientSafe.firebaseApiKeyConfigured &&
+          validation.publicClientSafe.firebaseAuthDomainConfigured &&
+          validation.publicClientSafe.firebaseProjectIdConfigured &&
+          validation.publicClientSafe.firebaseAppIdConfigured,
+      )],
+      ["Firebase Admin credentials", validation.serverOnly.firebaseAdminConfigured],
+    );
+  }
 
   if (flags.openBankingEnabled || flags.moneyhubSandboxEnabled || flags.truelayerSandboxEnabled) {
     const selectedProvider = env.OPEN_BANKING_PROVIDER ?? "mock";
@@ -202,10 +236,16 @@ export function clientSafeEnvironmentSummary(env: NodeJS.ProcessEnv = process.en
 
   return {
     deploymentEnvironment: validation.deploymentEnvironment,
+    backendProvider: validation.backendProvider,
     appBaseUrlConfigured: Boolean(validation.appBaseUrl),
     supabaseConfigured:
       validation.publicClientSafe.supabaseUrlConfigured &&
       validation.publicClientSafe.supabaseAnonKeyConfigured,
+    firebaseConfigured:
+      validation.publicClientSafe.firebaseApiKeyConfigured &&
+      validation.publicClientSafe.firebaseAuthDomainConfigured &&
+      validation.publicClientSafe.firebaseProjectIdConfigured &&
+      validation.publicClientSafe.firebaseAppIdConfigured,
     mockDataFallbackEnabled: validation.featureFlags.mockDataFallbackEnabled,
     openBankingEnabled: validation.featureFlags.openBankingEnabled,
     aiMoneyCoachEnabled: validation.featureFlags.aiMoneyCoachEnabled,

@@ -1,6 +1,6 @@
 # Deployment Checklist
 
-Use this for staging first. Netlify is the primary staging deployment path; Vercel remains supported as a secondary option. Do not use production credentials in the repository.
+Use this for staging first. Netlify + Firebase is the primary free staging path; Vercel remains a secondary deployment option. Supabase has been removed from the primary path. Do not use production credentials in the repository.
 
 ## Pre-Deployment
 
@@ -16,8 +16,10 @@ Use this for staging first. Netlify is the primary staging deployment path; Verc
 
 ## Environment Variables
 
-- Set Supabase URL and anon key.
-- Set Supabase service role key server-side only.
+- Set `BACKEND_PROVIDER=firebase` for the primary free path, or `mock` deliberately.
+- Set `FIREBASE_BACKEND_ENABLED=true`.
+- Set Firebase public web app values.
+- Set Firebase Admin credentials server-side only.
 - Set `CRON_SECRET`.
 - Set `NEXT_PUBLIC_APP_BASE_URL` or `APP_BASE_URL`.
 - Set feature flags for staging.
@@ -30,17 +32,24 @@ Use this for staging first. Netlify is the primary staging deployment path; Verc
 
 ## Database
 
-- Apply Supabase migrations with `supabase db push`.
-- Check migration status with the Supabase CLI or dashboard.
+### Firebase Free Path
+
+- Confirm `firebase/firestore.rules` is present.
+- Deploy Firestore rules from a trusted local Firebase CLI session.
+- Confirm the Firestore layout in `docs/firebase-schema.md`.
 - Seed fake demo data only if required.
-- Clear demo data before re-running sensitive tests.
-- Verify RLS policies on all user-owned tables.
+- Confirm users can access only `users/{auth.uid}` and nested collections.
+
+### Supabase (removed)
+
+- Supabase is removed from the primary path; no Supabase migration or env setup
+  is required. `BACKEND_PROVIDER=supabase` degrades safely to mock.
 
 ## Auth Redirects
 
-- Add the staging site URL to Supabase Auth allowed redirect URLs.
-- Add `/auth/callback`.
-- Confirm sign-in and sign-out work.
+- Add the staging site URL to Firebase Auth authorized domains.
+- Confirm Firebase email/password sign-in and sign-out work.
+- Confirm mock mode shows the demo message and requires no sign-in.
 
 ## Provider Redirects And Webhooks
 
@@ -54,7 +63,6 @@ Use this for staging first. Netlify is the primary staging deployment path; Verc
 
 - Configure Netlify scheduled functions from `netlify/functions`.
 - Keep Vercel Cron from `vercel.json` available as a secondary option.
-- Supabase Cron HTTP calls remain compatible.
 - Pass `CRON_SECRET` using Authorization bearer header or `x-cron-secret`.
 - Confirm invalid secrets are rejected.
 

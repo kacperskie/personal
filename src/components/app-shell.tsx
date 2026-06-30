@@ -7,6 +7,7 @@ import {
   BookOpenText,
   CalendarClock,
   Bell,
+  ClipboardList,
   CreditCard,
   Gauge,
   LayoutDashboard,
@@ -32,6 +33,7 @@ const navItems: NavItem[] = [
   { label: "Bills & Subscriptions", href: "/bills-and-subscriptions", icon: ReceiptText },
   { label: "Goals", href: "/goals", icon: PiggyBank },
   { label: "Manual Entries", href: "/manual-entries", icon: BookOpenText },
+  { label: "Setup", href: "/setup", icon: ClipboardList },
   { label: "Notifications", href: "/notifications", icon: Bell },
   { label: "AI Coach", href: "/ai-coach", icon: Bot },
   { label: "Settings", href: "/settings", icon: Settings },
@@ -50,6 +52,7 @@ const mobileSecondaryItems: NavItem[] = [
   { label: "Budgets", href: "/budgets", icon: Gauge },
   { label: "Goals", href: "/goals", icon: PiggyBank },
   { label: "Manual", href: "/manual-entries", icon: BookOpenText },
+  { label: "Setup", href: "/setup", icon: ClipboardList },
   { label: "AI Coach", href: "/ai-coach", icon: Bot },
 ];
 
@@ -127,10 +130,10 @@ export function AppShell({
         <div className="mt-6 hidden rounded-lg border border-line bg-paper p-4 lg:block">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-moss">
             <CalendarClock className="h-4 w-4" aria-hidden="true" />
-            Phase 5
+            Phase 12C
           </div>
           <p className="mt-2 text-sm leading-5 text-ink/65">
-            Mobile PWA and notification foundation. Real push delivery is off.
+            Firebase Free Mode with mock fallback preserved.
           </p>
         </div>
       </aside>

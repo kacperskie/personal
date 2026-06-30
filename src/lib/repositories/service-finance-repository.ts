@@ -16,6 +16,7 @@ import type {
   Transaction,
 } from "@/lib/domain";
 import { mergeSyncedTransaction } from "@/lib/bank-providers/provider-mappers";
+import { isFirebaseBackend } from "@/lib/backend/provider";
 import {
   mockAccounts,
   mockBankConnections,
@@ -66,7 +67,76 @@ export type ServiceFinanceSnapshot = {
   bankConnections: BankConnection[];
 };
 
+function removeUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(removeUndefined);
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entryValue]) => entryValue !== undefined)
+        .map(([key, entryValue]) => [key, removeUndefined(entryValue)]),
+    );
+  }
+
+  return value;
+}
+
+function firebaseUserCollection(userId: string, collectionName: string) {
+  return `users/${userId}/${collectionName}`;
+}
+
+async function createFirebaseServiceFirestore() {
+  const { createFirebaseAdminFirestore } = await import("@/lib/firebase/admin");
+  return createFirebaseAdminFirestore();
+}
+
+async function getFirebaseUserCollection<T>(
+  userId: string,
+  collectionName: string,
+  fallback: T[],
+): Promise<T[]> {
+  const db = await createFirebaseServiceFirestore();
+
+  if (!db) {
+    return fallback;
+  }
+
+  const snapshot = await db.collection(firebaseUserCollection(userId, collectionName)).get();
+  return snapshot.docs.map((document) => document.data() as T);
+}
+
+async function upsertFirebaseServiceDocument<T extends { id: string }>(
+  userId: string,
+  collectionName: string,
+  document: T,
+): Promise<T> {
+  const db = await createFirebaseServiceFirestore();
+
+  if (!db) {
+    return document;
+  }
+
+  await db
+    .collection(firebaseUserCollection(userId, collectionName))
+    .doc(document.id)
+    .set(removeUndefined(document) as Record<string, unknown>, { merge: true });
+  return document;
+}
+
 export async function getServiceActiveUserIds(): Promise<string[]> {
+  if (isFirebaseBackend()) {
+    const db = await createFirebaseServiceFirestore();
+
+    if (!db) {
+      return [fallbackUserId];
+    }
+
+    const snapshot = await db.collection("users").get();
+    return snapshot.docs.map((document) => document.id);
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -85,6 +155,39 @@ export async function getServiceActiveUserIds(): Promise<string[]> {
 export async function getServiceFinanceSnapshot(
   userId: string,
 ): Promise<ServiceFinanceSnapshot> {
+  if (isFirebaseBackend()) {
+    const [
+      accounts,
+      bills,
+      budgets,
+      budgetPeriods,
+      categories,
+      manualFinanceItems,
+      transactions,
+      bankConnections,
+    ] = await Promise.all([
+      getFirebaseUserCollection(userId, "accounts", mockAccounts),
+      getFirebaseUserCollection(userId, "bills", mockBills),
+      getFirebaseUserCollection(userId, "budgets", mockBudgets),
+      getFirebaseUserCollection(userId, "budgetPeriods", mockBudgetPeriods),
+      getFirebaseUserCollection(userId, "categories", mockCategories),
+      getFirebaseUserCollection(userId, "manualFinanceItems", mockManualFinanceItems),
+      getFirebaseUserCollection(userId, "transactions", mockTransactionRecords),
+      getFirebaseUserCollection(userId, "bankConnections", mockBankConnections),
+    ]);
+
+    return {
+      accounts,
+      bills,
+      budgets,
+      budgetPeriods,
+      categories,
+      manualFinanceItems,
+      transactions,
+      bankConnections,
+    };
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -149,6 +252,10 @@ export async function getServiceFinanceSnapshot(
 export async function getServiceNotificationPreferences(
   userId: string,
 ): Promise<NotificationPreference[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseUserCollection(userId, "notificationPreferences", mockNotificationPreferences);
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -170,6 +277,15 @@ export async function getServiceNotificationPreferences(
 export async function getServicePushSubscriptions(
   userId: string,
 ): Promise<PushSubscriptionRecord[]> {
+  if (isFirebaseBackend()) {
+    const records = await getFirebaseUserCollection(
+      userId,
+      "pushSubscriptions",
+      mockPushSubscriptionRecords,
+    );
+    return records.filter((record) => record.status === "active");
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -192,6 +308,29 @@ export async function getServicePushSubscriptions(
 export async function getServiceBankConnectionById(
   id: string,
 ): Promise<ServiceBankConnectionRecord | null> {
+  if (isFirebaseBackend()) {
+    const userIds = await getServiceActiveUserIds();
+    const db = await createFirebaseServiceFirestore();
+
+    if (!db) {
+      const connection = mockBankConnections.find((item) => item.id === id);
+      return connection ? { userId: fallbackUserId, connection } : null;
+    }
+
+    for (const userId of userIds) {
+      const snapshot = await db
+        .collection(firebaseUserCollection(userId, "bankConnections"))
+        .doc(id)
+        .get();
+
+      if (snapshot.exists) {
+        return { userId, connection: snapshot.data() as BankConnection };
+      }
+    }
+
+    return null;
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -216,6 +355,26 @@ export async function getServiceBankConnectionById(
 export async function getServiceActiveBankConnections(): Promise<
   ServiceBankConnectionRecord[]
 > {
+  if (isFirebaseBackend()) {
+    const userIds = await getServiceActiveUserIds();
+    const records = await Promise.all(
+      userIds.map(async (userId) => {
+        const connections = await getFirebaseUserCollection<BankConnection>(
+          userId,
+          "bankConnections",
+          mockBankConnections,
+        );
+        return connections
+          .filter(
+            (connection) =>
+              connection.status === "connected" || connection.status === "syncing",
+          )
+          .map((connection) => ({ userId, connection }));
+      }),
+    );
+    return records.flat();
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -240,6 +399,10 @@ export async function upsertServiceAccount(
   userId: string,
   account: Account,
 ): Promise<Account> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseServiceDocument(userId, "accounts", { ...account, userId });
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -263,6 +426,37 @@ export async function upsertServiceTransaction(
   userId: string,
   transaction: Transaction,
 ): Promise<Transaction> {
+  if (isFirebaseBackend()) {
+    const db = await createFirebaseServiceFirestore();
+
+    if (!db) {
+      return transaction;
+    }
+
+    const existingSnapshot = await db
+      .collection(firebaseUserCollection(userId, "transactions"))
+      .doc(transaction.id)
+      .get();
+    const mergedTransaction = mergeSyncedTransaction(
+      existingSnapshot.exists ? (existingSnapshot.data() as Transaction) : null,
+      transaction,
+    );
+    await upsertFirebaseServiceDocument(userId, "categories", {
+      id: mergedTransaction.categoryId,
+      userId,
+      name:
+        mergedTransaction.categoryId === "cat_uncategorised"
+          ? "Uncategorised"
+          : mergedTransaction.categoryId,
+      parentId: null,
+      kind: mergedTransaction.kind,
+      budgetType: "transfer",
+      includeInBudget: mergedTransaction.kind === "expense",
+      status: "active",
+    } satisfies Category);
+    return upsertFirebaseServiceDocument(userId, "transactions", mergedTransaction);
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -339,6 +533,10 @@ export async function recordServiceProviderSyncEvent(
   userId: string,
   event: ProviderSyncEvent,
 ): Promise<ProviderSyncEvent> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseServiceDocument(userId, "providerSyncEvents", event);
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -380,6 +578,10 @@ export async function updateServiceBankConnectionStatus(
   userId: string,
   connection: BankConnection,
 ): Promise<BankConnection> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseServiceDocument(userId, "bankConnections", connection);
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -401,6 +603,15 @@ export async function updateServiceBankConnectionStatus(
 }
 
 export async function recordServiceAuditEvent(input: AuditEventInput) {
+  if (isFirebaseBackend()) {
+    const event = createAuditEvent(input);
+    await upsertFirebaseServiceDocument(input.userId, "auditLog", {
+      id: `${event.event_type}_${event.entity_id ?? event.created_at}`,
+      ...event,
+    });
+    return event;
+  }
+
   const supabase = createSupabaseServiceRoleClient();
   const event = createAuditEvent(input);
 
@@ -419,6 +630,14 @@ export async function recordServiceAuditEvent(input: AuditEventInput) {
 export async function createServiceNotification(
   notification: AppNotification,
 ): Promise<AppNotification> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseServiceDocument(
+      notification.userId,
+      "appNotifications",
+      notification,
+    );
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {
@@ -459,6 +678,26 @@ export async function createServiceNotification(
 export async function recordServiceNotificationDeliveryAttempt(
   attempt: NotificationDeliveryAttempt,
 ): Promise<NotificationDeliveryAttempt> {
+  if (isFirebaseBackend()) {
+    const saved = await upsertFirebaseServiceDocument(
+      attempt.userId,
+      "notificationDeliveryAttempts",
+      attempt,
+    );
+    await recordServiceAuditEvent({
+      userId: attempt.userId,
+      eventType: "notification_delivery_attempt_created",
+      entity: "notification_delivery_attempts",
+      entityId: attempt.id,
+      metadata: {
+        notificationId: attempt.notificationId,
+        status: attempt.status,
+        channel: attempt.channel,
+      },
+    });
+    return saved;
+  }
+
   const supabase = createSupabaseServiceRoleClient();
 
   if (!supabase) {

@@ -79,6 +79,15 @@ import {
 } from "@/lib/transaction-intelligence";
 import { createAuditEvent } from "@/lib/repositories/audit";
 import type { AuditEventInput } from "@/lib/repositories/audit";
+import { isFirebaseBackend } from "@/lib/backend/provider";
+import {
+  deleteFirebaseDocument,
+  getFirebaseCollection,
+  getFirebaseDocument,
+  getFirebaseUserProfile,
+  recordFirebaseAuditEvent,
+  upsertFirebaseDocument,
+} from "@/lib/repositories/firebase-repository";
 import {
   createAccountUpdatePayload,
   validateManualFinanceItemInput,
@@ -128,6 +137,10 @@ async function writeAudit(
 }
 
 export async function recordAuditEvent(input: AuditEventInput) {
+  if (isFirebaseBackend()) {
+    return recordFirebaseAuditEvent(input);
+  }
+
   const context = await getAuthenticatedContext();
   const event = createAuditEvent({
     ...input,
@@ -143,6 +156,10 @@ export async function recordAuditEvent(input: AuditEventInput) {
 }
 
 export async function getAccounts(): Promise<Account[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("accounts", mockAccounts);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -162,6 +179,10 @@ export async function getAccounts(): Promise<Account[]> {
 }
 
 export async function getUserProfile(): Promise<UserProfile> {
+  if (isFirebaseBackend()) {
+    return getFirebaseUserProfile(mockUserProfile);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -198,6 +219,10 @@ export async function getUserProfile(): Promise<UserProfile> {
 }
 
 export async function upsertAccount(account: Account): Promise<Account> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("accounts", account);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -234,6 +259,25 @@ export async function updateAccountAssignment(
   payload: AccountUpdatePayload,
 ): Promise<AccountUpdatePayload> {
   const updatePayload = createAccountUpdatePayload(payload);
+
+  if (isFirebaseBackend()) {
+    const existing = await getFirebaseDocument("accounts", updatePayload.id);
+
+    if (existing) {
+      await upsertFirebaseDocument("accounts", {
+        ...existing,
+        purpose: updatePayload.purpose,
+        includeInSafeToSpend: updatePayload.includeInSafeToSpend,
+        includeInCashflow: updatePayload.includeInCashflow,
+        includeInNetWorth: updatePayload.includeInNetWorth,
+        linkedGoalIds: updatePayload.linkedGoalIds,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    return updatePayload;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -286,6 +330,10 @@ export async function updateAccountAssignment(
 }
 
 export async function getManualFinanceItems(): Promise<ManualFinanceItem[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("manualFinanceItems", mockManualFinanceItems);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -313,6 +361,11 @@ export async function createManualFinanceItem(
     createdAt: now,
     updatedAt: now,
   };
+
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("manualFinanceItems", item);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -352,6 +405,11 @@ export async function updateManualFinanceItem(
     updatedAt: new Date().toISOString(),
   };
   validateManualFinanceItemInput(item);
+
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("manualFinanceItems", item);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -385,6 +443,10 @@ export async function updateManualFinanceItem(
 }
 
 export async function deleteManualFinanceItem(id: string): Promise<{ id: string }> {
+  if (isFirebaseBackend()) {
+    return deleteFirebaseDocument("manualFinanceItems", id);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -415,6 +477,10 @@ export async function deleteManualFinanceItem(id: string): Promise<{ id: string 
 }
 
 export async function getBankConnections(): Promise<BankConnection[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("bankConnections", mockBankConnections);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -436,6 +502,10 @@ export async function getBankConnections(): Promise<BankConnection[]> {
 export async function upsertBankConnection(
   connection: BankConnection,
 ): Promise<BankConnection> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("bankConnections", connection);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -499,6 +569,14 @@ export async function upsertBankConnection(
 }
 
 export async function getBankConnectionById(id: string): Promise<BankConnection | null> {
+  if (isFirebaseBackend()) {
+    return (
+      (await getFirebaseDocument("bankConnections", id)) ??
+      mockBankConnections.find((connection) => connection.id === id) ??
+      null
+    );
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -522,6 +600,11 @@ export async function updateBankConnectionStatus(
   connection: BankConnection,
   eventType: "bank_connection_status_changed" | "bank_connection_sync_failed" | "bank_connection_revoked" = "bank_connection_status_changed",
 ): Promise<BankConnection> {
+  if (isFirebaseBackend()) {
+    void eventType;
+    return upsertFirebaseDocument("bankConnections", connection);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -560,6 +643,10 @@ export async function updateBankConnectionStatus(
 export async function recordProviderSyncEvent(
   event: ProviderSyncEvent,
 ): Promise<ProviderSyncEvent> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("providerSyncEvents", event);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -613,6 +700,13 @@ export async function recordProviderSyncEvent(
 }
 
 export async function upsertTransaction(transaction: Transaction): Promise<Transaction> {
+  if (isFirebaseBackend()) {
+    const existing = await getFirebaseDocument("transactions", transaction.id);
+    const mergedTransaction = mergeSyncedTransaction(existing, transaction);
+
+    return upsertFirebaseDocument("transactions", mergedTransaction);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -686,6 +780,10 @@ export async function upsertTransaction(transaction: Transaction): Promise<Trans
 }
 
 export async function getTransactions(): Promise<Transaction[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("transactions", mockTransactionRecords);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -705,6 +803,10 @@ export async function getTransactions(): Promise<Transaction[]> {
 }
 
 export async function getCategories(): Promise<Category[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("categories", mockCategories);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -724,6 +826,10 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function getBudgets(): Promise<Budget[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("budgets", mockBudgets);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -740,6 +846,10 @@ export async function getBudgets(): Promise<Budget[]> {
 }
 
 export async function getBudgetPeriods(): Promise<BudgetPeriod[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("budgetPeriods", mockBudgetPeriods);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -759,6 +869,10 @@ export async function getBudgetPeriods(): Promise<BudgetPeriod[]> {
 }
 
 export async function getBills(): Promise<Bill[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("bills", mockBills);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -778,6 +892,10 @@ export async function getBills(): Promise<Bill[]> {
 }
 
 export async function getSubscriptions(): Promise<Subscription[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("subscriptions", mockSubscriptions);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -797,6 +915,10 @@ export async function getSubscriptions(): Promise<Subscription[]> {
 }
 
 export async function getSavingsGoals(): Promise<SavingsGoal[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("savingsGoals", mockSavingsGoals);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -816,6 +938,10 @@ export async function getSavingsGoals(): Promise<SavingsGoal[]> {
 }
 
 export async function getDebts(): Promise<Debt[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("debts", mockDebts);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -835,6 +961,10 @@ export async function getDebts(): Promise<Debt[]> {
 }
 
 export async function createAIInsight(insight: AIInsight): Promise<AIInsight> {
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("aiInsights", insight);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -872,6 +1002,10 @@ export async function createAIInsight(insight: AIInsight): Promise<AIInsight> {
 }
 
 export async function getMerchantRules(): Promise<MerchantRule[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("merchantRules", defaultMerchantRules);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -891,8 +1025,13 @@ export async function getMerchantRules(): Promise<MerchantRule[]> {
 }
 
 export async function upsertMerchantRule(rule: MerchantRule): Promise<MerchantRule> {
-  const context = await getAuthenticatedContext();
   const updatedRule = { ...rule, updatedAt: new Date().toISOString() };
+
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("merchantRules", updatedRule);
+  }
+
+  const context = await getAuthenticatedContext();
 
   if (!context) {
     fallbackMerchantRules.set(updatedRule.id, updatedRule);
@@ -918,6 +1057,16 @@ export async function enrichTransactions(
   const sourceTransactions = transactions ?? (await getTransactions());
   const [accounts, merchantRules] = await Promise.all([getAccounts(), getMerchantRules()]);
   const enrichments = enrichTransactionSet(sourceTransactions, accounts, merchantRules);
+
+  if (isFirebaseBackend()) {
+    await Promise.all(
+      enrichments.map((enrichment) =>
+        upsertFirebaseDocument("transactionEnrichments", enrichment),
+      ),
+    );
+    return enrichments;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -942,6 +1091,11 @@ export async function enrichTransactions(
 }
 
 export async function getTransactionEnrichments(): Promise<TransactionEnrichment[]> {
+  if (isFirebaseBackend()) {
+    const enrichments = await getFirebaseCollection("transactionEnrichments", []);
+    return enrichments.length > 0 ? enrichments : enrichTransactions();
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -971,8 +1125,13 @@ export async function getTransactionEnrichments(): Promise<TransactionEnrichment
 export async function upsertTransactionEnrichment(
   enrichment: TransactionEnrichment,
 ): Promise<TransactionEnrichment> {
-  const context = await getAuthenticatedContext();
   const updated = { ...enrichment, updatedAt: new Date().toISOString() };
+
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("transactionEnrichments", updated);
+  }
+
+  const context = await getAuthenticatedContext();
 
   if (!context) {
     fallbackEnrichments.set(updated.id, updated);
@@ -993,6 +1152,25 @@ export async function upsertTransactionEnrichment(
 }
 
 export async function getRecurringPaymentCandidates(): Promise<RecurringPaymentCandidate[]> {
+  if (isFirebaseBackend()) {
+    const candidates = await getFirebaseCollection("recurringPaymentCandidates", []);
+
+    if (candidates.length > 0) {
+      return candidates;
+    }
+
+    const detected = detectRecurringPaymentCandidates(
+      await getTransactions(),
+      await getTransactionEnrichments(),
+    );
+    await Promise.all(
+      detected.map((candidate) =>
+        upsertFirebaseDocument("recurringPaymentCandidates", candidate),
+      ),
+    );
+    return detected;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -1022,6 +1200,19 @@ export async function getRecurringPaymentCandidates(): Promise<RecurringPaymentC
 export async function approveRecurringPaymentCandidate(
   id: string,
 ): Promise<RecurringPaymentCandidate | null> {
+  if (isFirebaseBackend()) {
+    const candidate =
+      (await getFirebaseDocument("recurringPaymentCandidates", id)) ??
+      (await getRecurringPaymentCandidates()).find((item) => item.id === id);
+
+    if (!candidate) {
+      return null;
+    }
+
+    const approved = approveRecurringCandidate(candidate);
+    return upsertFirebaseDocument("recurringPaymentCandidates", approved);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -1055,6 +1246,19 @@ export async function approveRecurringPaymentCandidate(
 export async function dismissRecurringPaymentCandidate(
   id: string,
 ): Promise<RecurringPaymentCandidate | null> {
+  if (isFirebaseBackend()) {
+    const candidate =
+      (await getFirebaseDocument("recurringPaymentCandidates", id)) ??
+      (await getRecurringPaymentCandidates()).find((item) => item.id === id);
+
+    if (!candidate) {
+      return null;
+    }
+
+    const dismissed = dismissRecurringCandidate(candidate);
+    return upsertFirebaseDocument("recurringPaymentCandidates", dismissed);
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -1086,6 +1290,23 @@ export async function dismissRecurringPaymentCandidate(
 }
 
 export async function getDetectedBills(): Promise<DetectedBill[]> {
+  if (isFirebaseBackend()) {
+    const bills = await getFirebaseCollection("detectedBills", []);
+
+    if (bills.length > 0) {
+      return bills;
+    }
+
+    const detectedBills = detectBillsFromCandidates(
+      await getRecurringPaymentCandidates(),
+      await getTransactionEnrichments(),
+    );
+    await Promise.all(
+      detectedBills.map((bill) => upsertFirebaseDocument("detectedBills", bill)),
+    );
+    return detectedBills;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -1113,8 +1334,13 @@ export async function getDetectedBills(): Promise<DetectedBill[]> {
 }
 
 export async function upsertDetectedBill(bill: DetectedBill): Promise<DetectedBill> {
-  const context = await getAuthenticatedContext();
   const updated = { ...bill, updatedAt: new Date().toISOString() };
+
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("detectedBills", updated);
+  }
+
+  const context = await getAuthenticatedContext();
 
   if (!context) {
     fallbackDetectedBills.set(updated.id, updated);
@@ -1135,6 +1361,26 @@ export async function upsertDetectedBill(bill: DetectedBill): Promise<DetectedBi
 }
 
 export async function getDetectedSubscriptions(): Promise<DetectedSubscription[]> {
+  if (isFirebaseBackend()) {
+    const subscriptions = await getFirebaseCollection("detectedSubscriptions", []);
+
+    if (subscriptions.length > 0) {
+      return subscriptions;
+    }
+
+    const detectedSubscriptions = detectSubscriptionsFromCandidates(
+      await getRecurringPaymentCandidates(),
+      await getTransactions(),
+      await getTransactionEnrichments(),
+    );
+    await Promise.all(
+      detectedSubscriptions.map((subscription) =>
+        upsertFirebaseDocument("detectedSubscriptions", subscription),
+      ),
+    );
+    return detectedSubscriptions;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -1167,8 +1413,13 @@ export async function getDetectedSubscriptions(): Promise<DetectedSubscription[]
 export async function upsertDetectedSubscription(
   subscription: DetectedSubscription,
 ): Promise<DetectedSubscription> {
-  const context = await getAuthenticatedContext();
   const updated = { ...subscription, updatedAt: new Date().toISOString() };
+
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("detectedSubscriptions", updated);
+  }
+
+  const context = await getAuthenticatedContext();
 
   if (!context) {
     fallbackDetectedSubscriptions.set(updated.id, updated);
@@ -1189,6 +1440,26 @@ export async function upsertDetectedSubscription(
 }
 
 export async function getSpendingAnomalies(): Promise<SpendingAnomaly[]> {
+  if (isFirebaseBackend()) {
+    const anomalies = await getFirebaseCollection("spendingAnomalies", []);
+
+    if (anomalies.length > 0) {
+      return anomalies;
+    }
+
+    const detected = detectSpendingAnomalies({
+      userId: "firebase_user",
+      transactions: await getTransactions(),
+      enrichments: await getTransactionEnrichments(),
+      detectedBills: await getDetectedBills(),
+      detectedSubscriptions: await getDetectedSubscriptions(),
+    });
+    await Promise.all(
+      detected.map((anomaly) => upsertFirebaseDocument("spendingAnomalies", anomaly)),
+    );
+    return detected;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -1214,6 +1485,38 @@ export async function getSpendingAnomalies(): Promise<SpendingAnomaly[]> {
 }
 
 export async function getCashflowEvents(): Promise<CashflowEvent[]> {
+  if (isFirebaseBackend()) {
+    const events = await getFirebaseCollection("cashflowEvents", []);
+
+    if (events.length > 0) {
+      return events;
+    }
+
+    const generated = buildCashflowEvents({
+      userId: "firebase_user",
+      bills: [
+        ...(await getBills()),
+        ...(await getDetectedBills()).filter((bill) => bill.status !== "dismissed"),
+      ],
+      subscriptions: [
+        ...(await getSubscriptions()),
+        ...(await getDetectedSubscriptions()).filter(
+          (subscription) => subscription.status !== "dismissed",
+        ),
+      ],
+      manualFinanceItems: await getManualFinanceItems(),
+      incomeCandidates: (await getRecurringPaymentCandidates()).filter(
+        (candidate) => candidate.candidateType === "income",
+      ),
+      startDate: "2026-06-30",
+      endDate: "2026-07-25",
+    });
+    await Promise.all(
+      generated.map((event) => upsertFirebaseDocument("cashflowEvents", event)),
+    );
+    return generated;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {

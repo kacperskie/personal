@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 12B makes Netlify the primary staging deployment target while preserving Vercel as a secondary option.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. v2 makes Netlify + Firebase the primary free deployment path with mock fallback; Supabase has been removed from the primary path. Vercel remains supported as a secondary deployment option, and TrueLayer sandbox and OpenAI remain optional and disabled by default.
 
 ## Current Phase
 
-Phase 12B: Netlify-first staging deployment.
+Phase 12C: Firebase Free Mode.
 
 Implemented locally:
 
@@ -53,16 +53,19 @@ Implemented locally:
 - Structured server logging helper under `src/lib/observability`.
 - Global error and not-found pages with safe copy.
 - Netlify deployment guide, staging smoke test, security checklist, and deployment checklist docs.
+- Firebase Auth, Firebase Admin session cookies, Firestore repository support, Firestore security rules, and a Firebase schema guide.
+- Backend selector with `BACKEND_PROVIDER=firebase|mock` (Supabase removed from the primary path).
+- Setup wizard at `/setup` for translating the old Google Sheets-style tracker into structured accounts, bills, subscriptions, manual entries, goals, debts, and review preferences.
 - Account-purpose default suggestions for American Express, Nationwide, and Revolut account patterns.
-- Supabase browser, server, and service-role client helpers.
-- Supabase-compatible sign-in page with email/password and magic-link flow.
-- Protected app routes when Supabase is configured.
+- Firebase browser and Admin client helpers.
+- Firebase email/password sign-in page; mock mode shows a clear demo message.
+- Protected app routes via the Firebase session cookie.
 - Basic user profile creation on sign-in.
 - SQL migration for finance tables, provider sync state, audit log, provider token placeholders, and RLS policies.
 - SQL migration for notification preferences, notification rules, app notifications, and sensitive push subscription placeholders.
 - SQL migration for provider transaction update metadata and repeat-sync dedupe index.
 - SQL migration for provider webhook events, sync jobs, and provider transaction status fields.
-- Repository layer that reads from Supabase when configured and falls back to mock/local data otherwise.
+- Firestore repository layer for Firebase mode, with mock fallback. (Legacy Supabase repository branches remain unused and archived.)
 - Editable Accounts page for account purpose, inclusion flags, and linked savings goals.
 - Editable Manual Entries page for create, update, delete, inclusion flags, status, and review dates.
 - Server-only provider token boundary stub. Real tokens are not stored in this phase.
@@ -88,47 +91,46 @@ Mock defaults:
 - Nationwide supports current account, bills account, savings, and credit-card-style roles.
 - Revolut supports everyday current account and vault-like savings balances where represented by the provider.
 
-## Supabase Setup
+## Firebase Free Mode
 
-Copy `.env.example` to `.env.local` and fill Supabase values when database-backed development is needed:
+Netlify + Firebase is the primary free deployment path from Phase 12C.
+
+Copy `.env.example` to `.env.local` and use:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-NEXT_PUBLIC_APP_BASE_URL=
-APP_BASE_URL=
-APP_ENV=staging
+BACKEND_PROVIDER=firebase
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
+OPEN_BANKING_PROVIDER=mock
 OPEN_BANKING_ENABLED=false
 AI_MONEY_COACH_ENABLED=false
 WEB_PUSH_ENABLED=false
 SCHEDULED_ALERTS_ENABLED=false
-MONEYHUB_SANDBOX_ENABLED=false
-TRUELAYER_SANDBOX_ENABLED=false
 MOCK_DATA_FALLBACK_ENABLED=true
 ```
 
-Do not commit real Supabase credentials.
+Firebase Auth uses email/password sign-in and exchanges the browser ID token for an HTTP-only Firebase session cookie through `/api/auth/firebase-session`. Firebase Admin credentials must stay server-side only.
 
-Apply the migrations in Supabase:
+Firestore rules live in `firebase/firestore.rules`, and the schema is documented in `docs/firebase-schema.md`. User data is stored under `users/{userId}` and nested user-owned collections.
 
-```bash
-supabase db push
-```
+Use `/setup` to translate the old Google Sheets-style tracker into structured finance data before enabling sandbox account connections.
 
-Or run the SQL in:
+## Supabase (removed from the primary path)
 
-```text
-supabase/migrations/20260701000000_phase4_secure_foundation.sql
-supabase/migrations/20260702000000_phase5_notifications_pwa.sql
-supabase/migrations/20260703000000_phase7_moneyhub_sync.sql
-supabase/migrations/20260704000000_phase8a_event_driven_sync.sql
-supabase/migrations/20260705000000_phase8b_transaction_intelligence.sql
-supabase/migrations/20260706000000_phase9_ai_money_coach.sql
-supabase/migrations/20260707000000_phase10_web_push_notifications.sql
-```
+Supabase has been **removed from the primary path in v2**. The two supported
+backends are now `BACKEND_PROVIDER=firebase` (deployed default) and
+`BACKEND_PROVIDER=mock` (local/demo). Setting `BACKEND_PROVIDER=supabase` now
+degrades safely to mock.
 
-When Supabase variables are missing, the app intentionally falls back to mock/local data so local UI and calculation work can continue without a database.
+Some legacy Supabase repository branches and the `supabase/migrations/*` SQL
+files remain in the tree as unused, archived references and are never selected on
+the Firebase free path. They will be deleted in a later cleanup stage. Do not set
+Supabase environment variables for the Firebase free deployment.
 
 ## Moneyhub Sandbox Setup
 
@@ -137,7 +139,8 @@ Moneyhub is the first provider implementation target. The current code is sandbo
 Required placeholders:
 
 ```bash
-OPEN_BANKING_PROVIDER=moneyhub
+BACKEND_PROVIDER=firebase
+OPEN_BANKING_PROVIDER=mock
 MONEYHUB_CLIENT_ID=
 MONEYHUB_CLIENT_SECRET=
 MONEYHUB_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
@@ -631,13 +634,13 @@ Troubleshooting:
 
 ## Staging Deployment
 
-Phase 12B makes Netlify the primary staging deployment path. Vercel remains supported as a secondary option through `vercel.json`.
+v2 makes Netlify + Firebase the primary free staging deployment path, with Vercel remaining supported as a secondary option. Supabase has been removed from the primary path.
 
 Readiness:
 
 - Visit `/settings/system-readiness`.
 - Confirm the deployment platform shows Netlify for Netlify staging.
-- Confirm Supabase, cron, base URL, optional Moneyhub or TrueLayer sandbox, optional OpenAI, and optional Web Push checks.
+- Confirm backend provider, Firebase client/admin and Firestore status, mock fallback, cron, base URL, optional TrueLayer sandbox, optional OpenAI, and optional Web Push checks.
 - The page shows labels, status, safe details, and remediation only. It must not show secret values.
 
 Netlify deployment steps:
@@ -650,16 +653,23 @@ Netlify deployment steps:
 6. Deploy staging.
 7. Run the smoke test checklist in `docs/staging-smoke-test.md`.
 
-Required for basic Netlify staging:
+Required for basic Netlify + Firebase staging:
 
 ```bash
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+BACKEND_PROVIDER=firebase
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
 APP_BASE_URL=
 CRON_SECRET=
 MOCK_DATA_FALLBACK_ENABLED=true
 ```
+
+Supabase has been removed from the primary path; `BACKEND_PROVIDER=supabase` now degrades safely to mock. Use `firebase` for staging or `mock` for a no-backend demo.
 
 Optional Netlify integrations:
 
@@ -851,6 +861,7 @@ Do not commit real credentials, client secrets, access tokens, refresh tokens, c
 - React 19
 - TypeScript
 - Tailwind CSS
+- Firebase Auth and Firestore
 - Supabase
 - Recharts
 - Vitest
@@ -953,6 +964,8 @@ personal-finance-hq/
 |  `- *.docx source documents
 |- supabase/
 |  `- migrations/
+|- firebase/
+|  `- firestore.rules
 |- public/
 |  |- manifest.webmanifest
 |  |- sw.js

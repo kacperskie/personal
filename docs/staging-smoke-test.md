@@ -6,13 +6,16 @@ Use this checklist after deploying Personal Finance HQ to staging. Use fake/demo
 
 - Deploy to Netlify as the primary staging path.
 - Confirm `netlify.toml` was used for the build.
+- Confirm `BACKEND_PROVIDER=firebase` for the primary free path.
 - Confirm `/settings/system-readiness` shows Netlify as the deployment platform.
+- Confirm `/settings/system-readiness` shows Firebase readiness without secret values.
 - Confirm Vercel support remains available as a secondary path if needed.
 
 ## Access And Auth
 
 - Sign up with a staging test account.
 - Sign in with the staging test account.
+- Confirm Firebase email/password sign-in works when Firebase is selected.
 - Sign out and confirm protected routes redirect to sign-in.
 - Visit `/settings/system-readiness` and confirm no secret values are shown.
 
@@ -27,6 +30,14 @@ Use this checklist after deploying Personal Finance HQ to staging. Use fake/demo
 - Notifications page loads.
 - AI Coach page loads.
 - Settings page loads.
+- Setup wizard loads.
+
+## Setup Wizard
+
+- Open `/setup`.
+- Step through the spreadsheet tracker checklist.
+- Mark at least one setup section complete.
+- Confirm the page does not ask for bank login credentials or real Open Banking tokens.
 
 ## Manual Entries
 

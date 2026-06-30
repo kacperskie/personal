@@ -50,6 +50,13 @@ export function buildSystemReadinessReport(
   const webPush = getClientWebPushConfig(env);
   const truelayerReadiness = getTrueLayerSandboxReadiness(env);
   const flags = validation.featureFlags;
+  const firebaseClientConfigured =
+    validation.publicClientSafe.firebaseApiKeyConfigured &&
+    validation.publicClientSafe.firebaseAuthDomainConfigured &&
+    validation.publicClientSafe.firebaseProjectIdConfigured &&
+    validation.publicClientSafe.firebaseAppIdConfigured;
+  const firebaseSelected = validation.backendProvider === "firebase";
+  const mockSelected = validation.backendProvider === "mock";
   const trueLayerSelected = env.OPEN_BANKING_PROVIDER === "truelayer";
   const selectedProvider = getOpenBankingProvider(env);
   const selectedProviderConfigured =
@@ -75,31 +82,65 @@ export function buildSystemReadinessReport(
         : null,
     ),
     check(
-      "supabase_url",
-      "Supabase URL",
-      statusFromConfigured(validation.publicClientSafe.supabaseUrlConfigured),
-      validation.publicClientSafe.supabaseUrlConfigured
-        ? "Configured for browser and server clients."
-        : "Missing; Supabase-backed auth and persistence will be unavailable.",
-      "Set the Supabase project URL in the deployment environment.",
+      "backend_provider",
+      "Backend provider",
+      validation.backendProvider === "mock" ? "warning" : "pass",
+      validation.backendProvider === "firebase"
+        ? "Firebase is selected as the primary free backend."
+        : "Mock backend is selected; no persistent backend is required.",
+      validation.backendProvider === "mock"
+        ? "Set BACKEND_PROVIDER=firebase for the Netlify free staging path."
+        : null,
     ),
     check(
-      "supabase_anon_key",
-      "Supabase anon key",
-      statusFromConfigured(validation.publicClientSafe.supabaseAnonKeyConfigured),
-      validation.publicClientSafe.supabaseAnonKeyConfigured
-        ? "Configured as a public Supabase client key."
-        : "Missing; Supabase browser/server clients cannot initialise.",
-      "Set the Supabase anon key in the deployment environment.",
+      "firebase_client",
+      "Firebase browser client",
+      firebaseSelected ? statusFromConfigured(firebaseClientConfigured) : "pass",
+      firebaseClientConfigured
+        ? "Firebase public web app configuration is present."
+        : "Missing; Firebase Auth and Firestore browser clients cannot initialise.",
+      firebaseSelected
+        ? "Set NEXT_PUBLIC_FIREBASE_API_KEY, AUTH_DOMAIN, PROJECT_ID, and APP_ID."
+        : null,
     ),
     check(
-      "supabase_service_role",
-      "Supabase service role key",
-      statusFromConfigured(validation.serverOnly.supabaseServiceRoleConfigured),
-      validation.serverOnly.supabaseServiceRoleConfigured
-        ? "Configured server-side only."
-        : "Missing; scheduled jobs and service-role reads will use fallback or fail safely.",
-      "Set the service role key only in server-side deployment variables.",
+      "firebase_admin",
+      "Firebase Admin server setup",
+      firebaseSelected
+        ? statusFromConfigured(validation.serverOnly.firebaseAdminConfigured)
+        : "pass",
+      validation.serverOnly.firebaseAdminConfigured
+        ? "Firebase Admin credentials are configured server-side."
+        : "Missing; Firebase session verification and server Firestore writes are unavailable.",
+      firebaseSelected
+        ? "Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY server-side."
+        : null,
+    ),
+    check(
+      "firestore",
+      "Firestore readiness",
+      firebaseSelected
+        ? statusFromConfigured(validation.serverOnly.firebaseAdminConfigured)
+        : "pass",
+      firebaseSelected
+        ? validation.serverOnly.firebaseAdminConfigured
+          ? "Firestore is reachable via Firebase Admin for server reads and writes."
+          : "Firestore is unavailable until Firebase Admin credentials are configured."
+        : "Mock backend selected; Firestore is not required.",
+      firebaseSelected && !validation.serverOnly.firebaseAdminConfigured
+        ? "Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY server-side."
+        : null,
+    ),
+    check(
+      "mock_fallback",
+      "Mock fallback status",
+      "pass",
+      flags.mockDataFallbackEnabled
+        ? mockSelected
+          ? "Mock data mode is active; the app runs without a backend."
+          : "Mock fallback is enabled and available if the backend is unconfigured."
+        : "Mock fallback is disabled; a configured backend is required.",
+      null,
     ),
     check(
       "openai",
@@ -199,11 +240,20 @@ export function buildSystemReadinessReport(
     check(
       "auth_redirects",
       "Auth redirect URLs",
-      statusFromConfigured(Boolean(validation.appBaseUrl && validation.publicClientSafe.supabaseUrlConfigured)),
+      statusFromConfigured(
+        Boolean(
+          validation.appBaseUrl &&
+            (firebaseSelected ? firebaseClientConfigured : true),
+        ),
+      ),
       validation.appBaseUrl
-        ? "Ready to configure in Supabase Auth settings."
+        ? firebaseSelected
+          ? "Ready to configure in Firebase authorized domains and provider settings."
+          : "Mock mode requires no auth redirect configuration."
         : "Cannot verify until the staging base URL is set.",
-      "Add the staging callback URL in Supabase Auth redirect settings.",
+      firebaseSelected
+        ? "Add the Netlify domain to Firebase Auth authorized domains."
+        : null,
     ),
     check(
       "webhook_urls",
@@ -266,6 +316,8 @@ export function assertNoSecretValuesInReadinessReport(report: SystemReadinessRep
     process.env.MONEYHUB_CLIENT_SECRET,
     process.env.TRUELAYER_CLIENT_SECRET,
     process.env.TRUELAYER_WEBHOOK_SECRET,
+    process.env.FIREBASE_PRIVATE_KEY,
+    process.env.FIREBASE_CLIENT_EMAIL,
     process.env.WEB_PUSH_VAPID_PRIVATE_KEY,
     process.env.CRON_SECRET,
   ].filter(Boolean) as string[];

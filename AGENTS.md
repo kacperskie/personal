@@ -14,7 +14,8 @@ Use mock/local data first, then direct account connection through Open Banking a
 - TypeScript
 - Tailwind CSS
 - shadcn/ui
-- Supabase Postgres
+- Firebase Auth, Firestore, and Firebase Admin for the primary free Netlify deployment path
+- (Supabase has been removed from the primary path in v2)
 - Recharts or ECharts for charts
 - OpenAI API for AI summaries and finance coaching
 
@@ -29,9 +30,10 @@ Use mock/local data first, then direct account connection through Open Banking a
 - Never commit Supabase credentials, provider credentials, access tokens, refresh tokens, or real financial records.
 - Require explicit user confirmation before any external action.
 - Keep real Open Banking API calls behind a feature flag until sandbox credentials, OAuth redirects, secure token storage, and security review are in place.
-- Keep Supabase access behind typed helpers and repository functions.
-- Keep mock/local fallback available for development when Supabase is not configured.
-- Enable RLS on every user-owned table and scope rows by `auth.uid() = user_id`.
+- Keep Firebase access behind typed helpers and repository functions when `BACKEND_PROVIDER=firebase`.
+- Keep mock/local fallback available for development when Firebase is not configured.
+- Preserve `BACKEND_PROVIDER=firebase|mock` unless explicitly changing backend strategy. Supabase is removed from the primary path.
+- Scope all Firestore access to the signed-in user via `firebase/firestore.rules` (`request.auth.uid == userId`).
 - Use UK terminology: current account, Direct Debit, standing order, ISA, pension, council tax.
 
 ## Safety rules
@@ -42,7 +44,7 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 ## Development rules
 - Make small, reviewable changes.
 - Add tests for calculations.
-- Add or update tests for repository logic, RLS migrations, and security boundaries when persistence changes.
+- Add or update tests for repository logic, Firestore security rules, and security boundaries when persistence changes.
 - Keep pages responsive.
 - Treat iPhone Safari and Home Screen PWA mode as first-class responsive targets.
 - Keep mobile navigation clear of safe-area insets and the iPhone Home indicator.
@@ -52,8 +54,15 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Before reporting deployment or staging work complete, always run lint, typecheck, tests, build, and audit.
 - Preserve mock fallback unless the user explicitly asks to remove it.
 
-## Supabase and Open Banking rules
-- Required local placeholders: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
+## Firebase and Open Banking rules
+- v2 makes Netlify + Firebase the primary free deployment path with mock fallback. Supabase is removed from the primary path.
+- Use `BACKEND_PROVIDER=firebase` for Firebase Auth, Firebase Admin session cookies, and Firestore repositories.
+- Use `BACKEND_PROVIDER=mock` for local mock-only work. Any other value degrades safely to mock.
+- Firebase public web app variables may be browser-visible; Firebase Admin variables must remain server-side only.
+- Never expose `FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, Firebase Admin credentials, provider tokens, or push subscription internals to browser code.
+- Firestore rules live in `firebase/firestore.rules` and must restrict access to `users/{auth.uid}` and nested user-owned collections.
+- Firebase schema documentation lives in `docs/firebase-schema.md`.
+- Required free-path variables: `NEXT_PUBLIC_FIREBASE_*`, `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, `APP_BASE_URL`, `CRON_SECRET`.
 - Open Banking uses Moneyhub as the first sandbox proof-of-concept provider and TrueLayer as a comparison adapter while preserving the mock provider fallback.
 - Provider-specific code must stay behind `src/lib/bank-providers`.
 - Public app code should call provider-agnostic routes, services, or repository functions only.
@@ -76,7 +85,7 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Provider payload inspection is sandbox-only, server-only, opt-in, redacted, and written only to gitignored local debug output.
 - Never commit real provider payloads; mapper tests must use synthetic fixtures only.
 - Phase 8B transaction intelligence must work from synced or mock transactions without adding CSV import or OpenAI.
-- Merchant rules, transaction enrichments, recurring candidates, detected bills, detected subscriptions, anomalies, and cashflow events must go through repository functions with Supabase and mock fallback support.
+- Merchant rules, transaction enrichments, recurring candidates, detected bills, detected subscriptions, anomalies, and cashflow events must go through repository functions with Firebase and mock fallback support.
 - Detected transfers should be excluded from spending by default, remain visible in Transactions, and stay reviewable by the user.
 - Recurring bills and subscriptions are candidates until reviewed or approved; do not silently convert review candidates into user decisions.
 - Preserve user-reviewed merchant, category, notes, transfer, and spending-exclusion decisions during repeat provider sync and enrichment runs.
@@ -121,7 +130,9 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 ## Deployment and staging rules
 - Staging comes before production.
 - Netlify is the primary staging deployment path.
+- Netlify + Firebase is the primary free staging workflow.
 - Preserve Vercel support as a secondary deployment option unless explicitly removed.
+- Supabase is removed from the primary path; do not reintroduce it as a backend without an explicit decision.
 - Keep Netlify scheduled functions as thin wrappers around protected API routes; do not duplicate scheduled business logic there.
 - Keep `netlify.toml`, `vercel.json`, and deployment docs aligned when deployment behaviour changes.
 - Do not commit real production credentials, staging credentials, provider credentials, OpenAI keys, VAPID private keys, cron secrets, Supabase service-role keys, provider tokens, or real financial data.

@@ -8,8 +8,17 @@ import {
   mockNotificationPreferences,
   mockPushSubscriptionRecords,
 } from "@/lib/mock-data";
+import { isFirebaseBackend } from "@/lib/backend/provider";
 import { createDefaultNotificationPreferences } from "@/lib/notifications";
 import { createAuditEvent } from "@/lib/repositories/audit";
+import {
+  deleteFirebaseDocument,
+  getFirebaseCollection,
+  getFirebaseDocument,
+  getFirebaseAuthenticatedContext,
+  recordFirebaseAuditEvent,
+  upsertFirebaseDocument,
+} from "@/lib/repositories/firebase-repository";
 import {
   appNotificationFromRow,
   appNotificationToRow,
@@ -49,6 +58,17 @@ async function writeAudit(
 }
 
 export async function getNotificationPreferences(): Promise<NotificationPreference[]> {
+  if (isFirebaseBackend()) {
+    const context = await getFirebaseAuthenticatedContext();
+    const preferences = await getFirebaseCollection(
+      "notificationPreferences",
+      mockNotificationPreferences,
+    );
+    return preferences.length > 0
+      ? preferences
+      : createDefaultNotificationPreferences(context?.userId ?? "firebase_user");
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -72,6 +92,24 @@ export async function getNotificationPreferences(): Promise<NotificationPreferen
 export async function upsertNotificationPreference(
   preference: NotificationPreference,
 ): Promise<NotificationPreference> {
+  if (isFirebaseBackend()) {
+    const context = await getFirebaseAuthenticatedContext();
+    const updated = {
+      ...preference,
+      userId: context?.userId ?? preference.userId,
+      updatedAt: new Date().toISOString(),
+    };
+    const saved = await upsertFirebaseDocument("notificationPreferences", updated);
+    await recordFirebaseAuditEvent({
+      userId: saved.userId,
+      eventType: "notification_preference_changed",
+      entity: "notification_preferences",
+      entityId: preference.id,
+      metadata: { type: preference.type, enabled: preference.enabled },
+    });
+    return saved;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -109,6 +147,13 @@ export async function upsertNotificationPreference(
 }
 
 export async function getNotifications(): Promise<AppNotification[]> {
+  if (isFirebaseBackend()) {
+    const notifications = await getFirebaseCollection("appNotifications", mockAppNotifications);
+    return notifications
+      .filter((notification) => notification.status !== "dismissed")
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -131,6 +176,22 @@ export async function getNotifications(): Promise<AppNotification[]> {
 export async function createNotification(
   notification: AppNotification,
 ): Promise<AppNotification> {
+  if (isFirebaseBackend()) {
+    const context = await getFirebaseAuthenticatedContext();
+    const saved = await upsertFirebaseDocument("appNotifications", {
+      ...notification,
+      userId: context?.userId ?? notification.userId,
+    });
+    await recordFirebaseAuditEvent({
+      userId: saved.userId,
+      eventType: "notification_created",
+      entity: "app_notifications",
+      entityId: saved.id,
+      metadata: { type: saved.type, severity: saved.severity },
+    });
+    return saved;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -164,6 +225,30 @@ export async function createNotification(
 
 export async function markNotificationRead(id: string): Promise<AppNotification | null> {
   const now = new Date().toISOString();
+
+  if (isFirebaseBackend()) {
+    const notification = await getFirebaseDocument("appNotifications", id);
+
+    if (!notification) {
+      return null;
+    }
+
+    const updated: AppNotification = {
+      ...notification,
+      status: "read",
+      readAt: notification.readAt ?? now,
+      updatedAt: now,
+    };
+    const saved = await upsertFirebaseDocument("appNotifications", updated);
+    await recordFirebaseAuditEvent({
+      userId: saved.userId,
+      eventType: "notification_marked_read",
+      entity: "app_notifications",
+      entityId: id,
+    });
+    return saved;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -198,6 +283,33 @@ export async function markNotificationRead(id: string): Promise<AppNotification 
 
 export async function markAllNotificationsRead(): Promise<AppNotification[]> {
   const now = new Date().toISOString();
+
+  if (isFirebaseBackend()) {
+    const notifications = await getFirebaseCollection("appNotifications", mockAppNotifications);
+    const updatedNotifications = notifications
+      .filter((notification) => notification.status !== "dismissed")
+      .map((notification) => ({
+        ...notification,
+        status: "read" as const,
+        readAt: notification.readAt ?? now,
+        updatedAt: now,
+      }));
+    await Promise.all(
+      updatedNotifications.map((notification) =>
+        upsertFirebaseDocument("appNotifications", notification),
+      ),
+    );
+    const context = await getFirebaseAuthenticatedContext();
+    await recordFirebaseAuditEvent({
+      userId: context?.userId ?? "firebase_user",
+      eventType: "notification_marked_read",
+      entity: "app_notifications",
+      entityId: null,
+      metadata: { scope: "all" },
+    });
+    return updatedNotifications;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -238,6 +350,30 @@ export async function markAllNotificationsRead(): Promise<AppNotification[]> {
 
 export async function dismissNotification(id: string): Promise<AppNotification | null> {
   const now = new Date().toISOString();
+
+  if (isFirebaseBackend()) {
+    const notification = await getFirebaseDocument("appNotifications", id);
+
+    if (!notification) {
+      return null;
+    }
+
+    const updated: AppNotification = {
+      ...notification,
+      status: "dismissed",
+      dismissedAt: now,
+      updatedAt: now,
+    };
+    const saved = await upsertFirebaseDocument("appNotifications", updated);
+    await recordFirebaseAuditEvent({
+      userId: saved.userId,
+      eventType: "notification_dismissed",
+      entity: "app_notifications",
+      entityId: id,
+    });
+    return saved;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -273,6 +409,11 @@ export async function dismissNotification(id: string): Promise<AppNotification |
 }
 
 export async function getUnreadNotificationCount(): Promise<number> {
+  if (isFirebaseBackend()) {
+    const notifications = await getFirebaseCollection("appNotifications", mockAppNotifications);
+    return notifications.filter((notification) => notification.status === "unread").length;
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -301,10 +442,13 @@ export async function savePushSubscriptionPlaceholder(
   input: PushSubscriptionPlaceholderInput,
 ): Promise<PushSubscriptionRecord> {
   const now = new Date().toISOString();
-  const context = await getAuthenticatedContext();
+  const firebaseContext = isFirebaseBackend()
+    ? await getFirebaseAuthenticatedContext()
+    : null;
+  const context = isFirebaseBackend() ? null : await getAuthenticatedContext();
   const record: PushSubscriptionRecord = {
     id: "push_placeholder_current_device",
-    userId: context?.userId ?? "user_mock_001",
+    userId: firebaseContext?.userId ?? context?.userId ?? "user_mock_001",
     endpointHash: "placeholder-no-real-endpoint",
     browser: input.browser,
     permission: input.permission,
@@ -315,6 +459,18 @@ export async function savePushSubscriptionPlaceholder(
   };
 
   if (!context) {
+    if (isFirebaseBackend()) {
+      const saved = await upsertFirebaseDocument("pushSubscriptions", record);
+      await recordFirebaseAuditEvent({
+        userId: saved.userId,
+        eventType: "push_subscription_placeholder_saved",
+        entity: "push_subscriptions",
+        entityId: saved.id,
+        metadata: { permission: input.permission },
+      });
+      return saved;
+    }
+
     return record;
   }
 
@@ -360,6 +516,18 @@ export async function savePushSubscriptionPlaceholder(
 export async function deletePushSubscriptionPlaceholder(
   id = "push_placeholder_current_device",
 ): Promise<{ id: string }> {
+  if (isFirebaseBackend()) {
+    await deleteFirebaseDocument("pushSubscriptions", id);
+    const context = await getFirebaseAuthenticatedContext();
+    await recordFirebaseAuditEvent({
+      userId: context?.userId ?? "firebase_user",
+      eventType: "push_subscription_placeholder_deleted",
+      entity: "push_subscriptions",
+      entityId: id,
+    });
+    return { id };
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
@@ -391,6 +559,22 @@ export async function deletePushSubscriptionPlaceholder(
 }
 
 export async function auditPushNotificationPermissionRequested(permission: string) {
+  if (isFirebaseBackend()) {
+    const context = await getFirebaseAuthenticatedContext();
+    await recordFirebaseAuditEvent({
+      userId: context?.userId ?? "firebase_user",
+      eventType: "push_notification_permission_requested",
+      entity: "push_subscriptions",
+      entityId: null,
+      metadata: { permission },
+    });
+
+    return {
+      permission,
+      audited: Boolean(context),
+    };
+  }
+
   const context = await getAuthenticatedContext();
 
   if (!context) {
