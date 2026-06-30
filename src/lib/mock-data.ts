@@ -10,7 +10,11 @@ import type {
   Debt,
   ManualFinanceItem,
   NetWorthSnapshot,
+  AppNotification,
   SavingsGoal,
+  NotificationPreference,
+  NotificationRule,
+  PushSubscriptionRecord,
   Subscription,
   Transaction,
   UserProfile,
@@ -40,6 +44,10 @@ import {
   type Tone,
 } from "@/lib/finance";
 import { formatDateShort } from "@/lib/format";
+import {
+  createDefaultNotificationPreferences,
+  generateFinanceNotifications,
+} from "@/lib/notifications";
 
 export type BudgetCategory = BudgetHealthItem;
 
@@ -1200,6 +1208,59 @@ export const mockAlerts: Alert[] = [
   },
 ];
 
+export const mockNotificationPreferences: NotificationPreference[] =
+  createDefaultNotificationPreferences(userId, createdAt);
+
+export const mockNotificationRules: NotificationRule[] = [
+  {
+    id: "rule_low_balance",
+    userId,
+    type: "low_balance",
+    enabled: true,
+    thresholdAmount: 250,
+    thresholdPercentage: null,
+    daysBefore: null,
+    createdAt,
+    updatedAt: createdAt,
+  },
+  {
+    id: "rule_budget_threshold",
+    userId,
+    type: "budget_threshold",
+    enabled: true,
+    thresholdAmount: null,
+    thresholdPercentage: 0.85,
+    daysBefore: null,
+    createdAt,
+    updatedAt: createdAt,
+  },
+  {
+    id: "rule_bill_due",
+    userId,
+    type: "bill_due",
+    enabled: true,
+    thresholdAmount: null,
+    thresholdPercentage: null,
+    daysBefore: 7,
+    createdAt,
+    updatedAt: createdAt,
+  },
+];
+
+export const mockPushSubscriptionRecords: PushSubscriptionRecord[] = [
+  {
+    id: "push_placeholder_001",
+    userId,
+    endpointHash: "mock-endpoint-hash",
+    browser: "iPhone Safari placeholder",
+    permission: "default",
+    status: "placeholder",
+    lastSeenAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  },
+];
+
 export const mockFinanceData = {
   userProfile: mockUserProfile,
   accounts: mockAccounts,
@@ -1214,6 +1275,9 @@ export const mockFinanceData = {
   netWorthSnapshots: mockNetWorthSnapshots,
   aiInsights: mockAIInsights,
   alerts: mockAlerts,
+  notificationPreferences: mockNotificationPreferences,
+  notificationRules: mockNotificationRules,
+  pushSubscriptionRecords: mockPushSubscriptionRecords,
   bankConnections: mockBankConnections,
   manualFinanceItems: mockManualFinanceItems,
 };
@@ -1312,6 +1376,18 @@ export const budgetHealth = calculateBudgetHealth(
   currentPeriod,
   elapsedBudgetPeriodRatio,
 );
+
+export const mockAppNotifications: AppNotification[] = generateFinanceNotifications({
+  userId,
+  asOfDate,
+  safeToSpend: dashboardSummary.safeToSpend,
+  previousSafeToSpend: dashboardSummary.safeToSpend + 145,
+  preferences: mockNotificationPreferences,
+  bills: mockBills,
+  budgetHealth,
+  bankConnections: mockBankConnections,
+  manualFinanceItems: mockManualFinanceItems,
+});
 
 export const upcomingBills = getUpcomingBillItems(
   mockBills,

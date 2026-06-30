@@ -42,6 +42,8 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Add tests for calculations.
 - Add or update tests for repository logic, RLS migrations, and security boundaries when persistence changes.
 - Keep pages responsive.
+- Treat iPhone Safari and Home Screen PWA mode as first-class responsive targets.
+- Keep mobile navigation clear of safe-area insets and the iPhone Home indicator.
 - Use accessible UI components.
 - Run linting, type-checking, tests, build, and audit before reporting completion.
 - Update README.md when setup or commands change.
@@ -52,6 +54,15 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Provider tokens must only be handled in server-only modules.
 - Production token storage should use encrypted storage or provider-managed token vaulting where available.
 - Do not add real Open Banking API calls, real provider credentials, or token persistence without a security review.
+
+## Mobile, PWA, and notification rules
+- Keep the app installable with `manifest.webmanifest`, iOS web app metadata, Apple touch icon placeholders, and service worker registration.
+- Service worker code may provide offline fallback, notification-click handling, and placeholder push handling only.
+- Do not add real push notification delivery until explicit permission, secure subscription storage, endpoint redaction, VAPID/provider setup, and security review are in place.
+- Do not request browser notification permission automatically; only request it after the user taps an Enable Notifications control.
+- Keep notification copy shown outside the app privacy-safe by default. Avoid amounts, bank names, account names, and detailed financial facts in browser notification text.
+- Detailed notification content may appear only inside the authenticated app.
+- Treat push subscription records as sensitive and avoid exposing endpoint internals in UI or logs.
 
 ## Important documents
 Read these before implementation:

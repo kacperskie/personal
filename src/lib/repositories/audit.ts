@@ -8,7 +8,14 @@ export type AuditEventType =
   | "manual_finance_item_deleted"
   | "bank_connection_created"
   | "bank_connection_status_changed"
-  | "consent_status_changed";
+  | "consent_status_changed"
+  | "notification_preference_changed"
+  | "notification_created"
+  | "notification_marked_read"
+  | "notification_dismissed"
+  | "push_notification_permission_requested"
+  | "push_subscription_placeholder_saved"
+  | "push_subscription_placeholder_deleted";
 
 export type AuditEventInput = {
   userId: string;

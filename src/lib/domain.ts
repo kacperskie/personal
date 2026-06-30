@@ -362,6 +362,82 @@ export type Alert = {
   createdAt: string;
 };
 
+export type NotificationType =
+  | "low_balance"
+  | "bill_due"
+  | "budget_threshold"
+  | "subscription_change"
+  | "consent_renewal"
+  | "account_sync_failure"
+  | "payday_planning"
+  | "manual_item_review"
+  | "safe_to_spend_change";
+
+export type NotificationChannel = "in_app" | "web_push" | "email_placeholder";
+
+export type NotificationSeverity = "info" | "warning" | "urgent";
+
+export type NotificationStatus = "unread" | "read" | "dismissed";
+
+export type NotificationPreference = {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  enabled: boolean;
+  channels: NotificationChannel[];
+  lowBalanceThreshold: number;
+  budgetWarningPercentage: number;
+  billReminderDays: number;
+  quietHoursStart: string | null;
+  quietHoursEnd: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NotificationRule = {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  enabled: boolean;
+  thresholdAmount: number | null;
+  thresholdPercentage: number | null;
+  daysBefore: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AppNotification = {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  severity: NotificationSeverity;
+  channel: NotificationChannel;
+  title: string;
+  body: string;
+  privacySafeTitle: string;
+  privacySafeBody: string;
+  actionHref: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  status: NotificationStatus;
+  readAt: string | null;
+  dismissedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PushSubscriptionRecord = {
+  id: string;
+  userId: string;
+  endpointHash: string;
+  browser: string;
+  permission: NotificationPermission | "unsupported";
+  status: "placeholder" | "active" | "revoked";
+  lastSeenAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type ManualFinanceItemType =
   | "debt"
   | "money_owed_to_user"

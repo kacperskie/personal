@@ -2,26 +2,32 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 4 adds Supabase-ready persistence, authentication foundations, database migrations, RLS policies, repository fallbacks, and the secure boundary needed before future direct account connections.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 5 adds a mobile-friendly iPhone PWA shell, install guidance, service worker foundation, notification models, notification preferences, and an in-app notification centre.
 
 ## Current Phase
 
-Phase 4: Supabase persistence, authentication, database schema, and secure Open Banking foundation.
+Phase 5: mobile PWA and notification foundation.
 
 Implemented locally:
 
 - Next.js dashboard shell with sidebar navigation.
+- Mobile app shell with bottom navigation, safe-area support, and touch-friendly controls.
 - Dashboard, Accounts, Transactions, Budgets, Bills & Subscriptions, Goals, Manual Entries, AI Coach, Settings, and Settings / Connected Accounts pages.
+- Notifications page with unread count, severity filtering, mark-read, mark-all-read, dismiss, and action links.
+- iPhone PWA metadata, `manifest.webmanifest`, app icon placeholders, Apple touch icon placeholder, and service worker registration.
+- Offline fallback page and service worker handlers for fetch, push placeholders, and notification clicks.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
 - Protected app routes when Supabase is configured.
 - Basic user profile creation on sign-in.
 - SQL migration for finance tables, provider sync state, audit log, provider token placeholders, and RLS policies.
+- SQL migration for notification preferences, notification rules, app notifications, and sensitive push subscription placeholders.
 - Repository layer that reads from Supabase when configured and falls back to mock/local data otherwise.
 - Editable Accounts page for account purpose, inclusion flags, and linked savings goals.
 - Editable Manual Entries page for create, update, delete, inclusion flags, status, and review dates.
 - Server-only provider token boundary stub. Real tokens are not stored in this phase.
-- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, and token-store boundaries.
+- Notification repository functions, deterministic notification generation helpers, privacy-safe copy helpers, and audit events.
+- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, token-store boundaries, PWA files, install guidance, and notification rules.
 
 ## Product Direction
 
@@ -53,7 +59,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 Do not commit real Supabase credentials.
 
-Apply the Phase 4 migration in Supabase:
+Apply the migrations in Supabase:
 
 ```bash
 supabase db push
@@ -63,6 +69,7 @@ Or run the SQL in:
 
 ```text
 supabase/migrations/20260701000000_phase4_secure_foundation.sql
+supabase/migrations/20260702000000_phase5_notifications_pwa.sql
 ```
 
 When Supabase variables are missing, the app intentionally falls back to mock/local data so local UI and calculation work can continue without a database.
@@ -92,6 +99,89 @@ The migration covers:
 - provider_sync_events
 - provider_tokens
 - audit_log
+- notification_preferences
+- notification_rules
+- app_notifications
+- push_subscriptions
+
+Push subscription records are treated as sensitive. The current implementation stores placeholder metadata only and does not store real browser push endpoint internals.
+
+## Mobile And PWA
+
+The app is designed for desktop, tablet, iPhone Safari, and iPhone Home Screen PWA mode.
+
+Mobile expectations:
+
+- Keep primary actions reachable with touch targets of at least 44px.
+- Keep the bottom navigation clear of `env(safe-area-inset-bottom)` and the iPhone Home indicator.
+- Use stacked cards or horizontal scroll for dense finance tables.
+- Avoid cramped dashboard cards and preserve readable financial figures.
+- Preserve protected route and sign-out behaviour on mobile.
+
+iPhone install steps:
+
+1. Open Personal Finance HQ in Safari.
+2. Tap Share.
+3. Tap Add to Home Screen.
+4. Open from the Home Screen icon.
+
+PWA files:
+
+- `public/manifest.webmanifest`
+- `public/sw.js`
+- `public/offline.html`
+- `public/icons/icon-192.svg`
+- `public/icons/icon-512.svg`
+- `public/icons/apple-touch-icon.svg`
+
+The service worker registers from `src/components/pwa/service-worker-registrar.tsx`, provides a simple offline fallback, handles notification click events, and contains placeholder push handling. Real push delivery is not enabled.
+
+## Notification Architecture
+
+Domain types:
+
+- `NotificationPreference`
+- `NotificationRule`
+- `AppNotification`
+- `PushSubscriptionRecord`
+
+Notification channels:
+
+- `in_app`
+- `web_push`
+- `email_placeholder`
+
+Notification severities:
+
+- `info`
+- `warning`
+- `urgent`
+
+Notification generation is deterministic in `src/lib/notifications.ts`:
+
+- Low balance when safe-to-spend falls below the configured threshold.
+- Bill due when a bill is due within the configured reminder window.
+- Budget warning when usage exceeds the configured percentage.
+- Consent renewal when account consent is expired or expiring soon.
+- Sync failure when a provider connection has failed.
+- Manual review when a manual item review date is due.
+- Safe-to-spend change when the value changes materially.
+
+Repository functions live in `src/lib/repositories/notification-repository.ts` and use Supabase when configured, with mock/local fallback otherwise.
+
+## Notification Privacy
+
+Notification text shown outside the authenticated app is privacy-safe by default. Browser notification copy should use generic wording such as:
+
+- Bill due soon
+- Budget warning
+- Account connection needs attention
+- Manual item needs review
+- Safe-to-spend changed
+
+Detailed amounts, bank names, bill names, and account names should only appear inside the authenticated app.
+
+Real push notification delivery remains future work. It will require explicit permission, secure push subscription storage, endpoint redaction, VAPID/provider setup, and a security review.
 
 ## Provider Abstraction
 
@@ -112,7 +202,7 @@ The adapter interface supports:
 - `refreshConnection()`
 - `revokeConnection()`
 
-Phase 4 still uses `mockOpenBankingProvider` only. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
+Phase 5 still uses `mockOpenBankingProvider` only. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
 
 ## Open Banking Token Boundary
 
@@ -187,6 +277,10 @@ Core domain types:
 - `NetWorthSnapshot`
 - `AIInsight`
 - `Alert`
+- `NotificationPreference`
+- `NotificationRule`
+- `AppNotification`
+- `PushSubscriptionRecord`
 - `ManualFinanceItem`
 
 Account purposes:
@@ -225,6 +319,10 @@ personal-finance-hq/
 |  `- *.docx source documents
 |- supabase/
 |  `- migrations/
+|- public/
+|  |- manifest.webmanifest
+|  |- sw.js
+|  `- icons/
 |- src/
 |  |- app/
 |  |- components/

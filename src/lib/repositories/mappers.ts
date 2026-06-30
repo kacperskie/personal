@@ -3,7 +3,10 @@ import type {
   BankConnection,
   Bill,
   Budget,
+  AppNotification,
   ManualFinanceItem,
+  NotificationPreference,
+  PushSubscriptionRecord,
   SavingsGoal,
   Transaction,
 } from "@/lib/domain";
@@ -17,6 +20,10 @@ type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"];
 type BudgetRow = Database["public"]["Tables"]["budgets"]["Row"];
 type BillRow = Database["public"]["Tables"]["bills"]["Row"];
 type SavingsGoalRow = Database["public"]["Tables"]["savings_goals"]["Row"];
+type NotificationPreferenceRow =
+  Database["public"]["Tables"]["notification_preferences"]["Row"];
+type AppNotificationRow = Database["public"]["Tables"]["app_notifications"]["Row"];
+type PushSubscriptionRow = Database["public"]["Tables"]["push_subscriptions"]["Row"];
 
 export function accountFromRow(row: AccountRow): Account {
   return {
@@ -243,6 +250,106 @@ export function savingsGoalFromRow(row: SavingsGoalRow): SavingsGoal {
     monthlyContribution: row.monthly_contribution,
     includeInNetWorth: row.include_in_net_worth,
     status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function notificationPreferenceFromRow(
+  row: NotificationPreferenceRow,
+): NotificationPreference {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    enabled: row.enabled,
+    channels: row.channels,
+    lowBalanceThreshold: row.low_balance_threshold,
+    budgetWarningPercentage: row.budget_warning_percentage,
+    billReminderDays: row.bill_reminder_days,
+    quietHoursStart: row.quiet_hours_start,
+    quietHoursEnd: row.quiet_hours_end,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function notificationPreferenceToRow(
+  preference: NotificationPreference,
+  userId: string,
+): NotificationPreferenceRow {
+  return {
+    id: preference.id,
+    user_id: userId,
+    type: preference.type,
+    enabled: preference.enabled,
+    channels: preference.channels,
+    low_balance_threshold: preference.lowBalanceThreshold,
+    budget_warning_percentage: preference.budgetWarningPercentage,
+    bill_reminder_days: preference.billReminderDays,
+    quiet_hours_start: preference.quietHoursStart,
+    quiet_hours_end: preference.quietHoursEnd,
+    created_at: preference.createdAt,
+    updated_at: preference.updatedAt,
+  };
+}
+
+export function appNotificationFromRow(row: AppNotificationRow): AppNotification {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    severity: row.severity,
+    channel: row.channel,
+    title: row.title,
+    body: row.body,
+    privacySafeTitle: row.privacy_safe_title,
+    privacySafeBody: row.privacy_safe_body,
+    actionHref: row.action_href,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    status: row.status,
+    readAt: row.read_at,
+    dismissedAt: row.dismissed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function appNotificationToRow(
+  notification: AppNotification,
+  userId: string,
+): AppNotificationRow {
+  return {
+    id: notification.id,
+    user_id: userId,
+    type: notification.type,
+    severity: notification.severity,
+    channel: notification.channel,
+    title: notification.title,
+    body: notification.body,
+    privacy_safe_title: notification.privacySafeTitle,
+    privacy_safe_body: notification.privacySafeBody,
+    action_href: notification.actionHref,
+    entity_type: notification.entityType,
+    entity_id: notification.entityId,
+    status: notification.status,
+    read_at: notification.readAt,
+    dismissed_at: notification.dismissedAt,
+    created_at: notification.createdAt,
+    updated_at: notification.updatedAt,
+  };
+}
+
+export function pushSubscriptionFromRow(row: PushSubscriptionRow): PushSubscriptionRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    endpointHash: row.endpoint_hash,
+    browser: row.browser,
+    permission: row.permission,
+    status: row.status,
+    lastSeenAt: row.last_seen_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

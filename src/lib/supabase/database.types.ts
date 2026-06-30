@@ -11,6 +11,10 @@ import type {
   EntityStatus,
   ManualFinanceDirection,
   ManualFinanceItemType,
+  NotificationChannel,
+  NotificationSeverity,
+  NotificationStatus,
+  NotificationType,
   Recurrence,
 } from "@/lib/domain";
 
@@ -271,6 +275,96 @@ export type Database = {
           target_amount: number;
         };
         Update: Partial<Database["public"]["Tables"]["savings_goals"]["Row"]>;
+        Relationships: [];
+      };
+      notification_preferences: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: NotificationType;
+          enabled: boolean;
+          channels: NotificationChannel[];
+          low_balance_threshold: number;
+          budget_warning_percentage: number;
+          bill_reminder_days: number;
+          quiet_hours_start: string | null;
+          quiet_hours_end: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["notification_preferences"]["Row"]> & {
+          user_id: string;
+          type: NotificationType;
+        };
+        Update: Partial<Database["public"]["Tables"]["notification_preferences"]["Row"]>;
+        Relationships: [];
+      };
+      notification_rules: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: NotificationType;
+          enabled: boolean;
+          threshold_amount: number | null;
+          threshold_percentage: number | null;
+          days_before: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["notification_rules"]["Row"]> & {
+          user_id: string;
+          type: NotificationType;
+        };
+        Update: Partial<Database["public"]["Tables"]["notification_rules"]["Row"]>;
+        Relationships: [];
+      };
+      app_notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: NotificationType;
+          severity: NotificationSeverity;
+          channel: NotificationChannel;
+          title: string;
+          body: string;
+          privacy_safe_title: string;
+          privacy_safe_body: string;
+          action_href: string | null;
+          entity_type: string | null;
+          entity_id: string | null;
+          status: NotificationStatus;
+          read_at: string | null;
+          dismissed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["app_notifications"]["Row"]> & {
+          user_id: string;
+          type: NotificationType;
+          title: string;
+          body: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["app_notifications"]["Row"]>;
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          endpoint_hash: string;
+          browser: string;
+          permission: NotificationPermission | "unsupported";
+          status: "placeholder" | "active" | "revoked";
+          last_seen_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["push_subscriptions"]["Row"]> & {
+          user_id: string;
+          endpoint_hash: string;
+          browser: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["push_subscriptions"]["Row"]>;
         Relationships: [];
       };
       audit_log: {

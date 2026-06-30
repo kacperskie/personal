@@ -1,11 +1,17 @@
 import Link from "next/link";
 import { Cable, ShieldCheck, ToggleLeft } from "lucide-react";
+import { NotificationPreferencesManager } from "@/components/notifications/notification-preferences-manager";
 import { PageHeader } from "@/components/page-header";
+import { InstallGuidance } from "@/components/pwa/install-guidance";
 import { SignOutButton } from "@/components/sign-out-button";
+import { getNotificationPreferences } from "@/lib/repositories/notification-repository";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
-export default function SettingsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function SettingsPage() {
   const supabaseConfigured = isSupabaseConfigured();
+  const notificationPreferences = await getNotificationPreferences();
 
   return (
     <div className="space-y-6">
@@ -67,6 +73,10 @@ export default function SettingsPage() {
           </dl>
         </article>
       </section>
+
+      <NotificationPreferencesManager preferences={notificationPreferences} />
+
+      <InstallGuidance />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
         <h2 className="text-base font-semibold text-ink">Safety rules</h2>

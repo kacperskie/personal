@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Personal Finance HQ icon">
+  <rect width="512" height="512" rx="108" fill="#17211f"/>
+  <rect x="112" y="150" width="288" height="212" rx="40" fill="#f7f7f2"/>
+  <path d="M152 220h208M152 278h120" stroke="#17211f" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="352" cy="314" r="34" fill="#1d8a7a"/>
+</svg>
