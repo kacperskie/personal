@@ -49,6 +49,8 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Use accessible UI components.
 - Run linting, type-checking, tests, build, and audit before reporting completion.
 - Update README.md when setup or commands change.
+- Before reporting deployment or staging work complete, always run lint, typecheck, tests, build, and audit.
+- Preserve mock fallback unless the user explicitly asks to remove it.
 
 ## Supabase and Open Banking rules
 - Required local placeholders: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
@@ -111,6 +113,18 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - AI notification copy shown outside the app must stay generic, such as "Money coach review ready", "Payday plan ready", "Money coach needs attention", or "Money coach unavailable".
 - Detailed notification content may appear only inside the authenticated app.
 - Treat push subscription records as sensitive and avoid exposing endpoint internals in UI or logs.
+
+## Deployment and staging rules
+- Staging comes before production.
+- Do not commit real production credentials, staging credentials, provider credentials, OpenAI keys, VAPID private keys, cron secrets, Supabase service-role keys, provider tokens, or real financial data.
+- Do not use real financial data in tests, fixtures, seed data, screenshots, logs, or docs.
+- Keep deployment readiness checks server-side and expose only safe status, labels, and remediation.
+- Keep exact secret values out of readiness pages, client pages, logs, tests, and snapshots.
+- Route protection for AI, Moneyhub, push, webhook, and scheduled jobs must remain covered by tests.
+- Scheduled routes must fail closed when `CRON_SECRET` is missing or invalid.
+- Feature flags should fail safely: optional integrations stay disabled unless explicitly configured.
+- Use structured logs with redaction for auth, provider sync, webhook, AI, notification delivery, and scheduled job failures.
+- Do not log raw financial payloads, provider payload dumps, full account numbers, provider tokens, OpenAI prompts with sensitive context, or push subscription internals.
 
 ## Important documents
 Read these before implementation:

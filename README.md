@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 10 adds scheduled alert generation and VAPID Web Push delivery for the PWA, with iPhone-safe notification behaviour and privacy-safe external copy.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 11 prepares the app for secure staging deployment with readiness checks, typed environment validation, deployment runbooks, smoke tests, security checklists, and safe observability.
 
 ## Current Phase
 
-Phase 10: scheduled alerts and Web Push delivery.
+Phase 11: secure staging readiness.
 
 Implemented locally:
 
@@ -43,6 +43,11 @@ Implemented locally:
 - Service worker push handling for privacy-safe notification text and safe `/notifications` deep-link fallback.
 - Settings notification UX for iPhone Home Screen PWA guidance, permission status, push status, enable/disable, and test notification.
 - Vercel Cron configuration in `vercel.json` for scheduled notifications and scheduled bank sync.
+- Server-only deployment readiness and environment validation modules under `src/lib/deployment`.
+- Safe readiness page at `/settings/system-readiness`.
+- Structured server logging helper under `src/lib/observability`.
+- Global error and not-found pages with safe copy.
+- Staging smoke test, security checklist, and deployment checklist docs.
 - Account-purpose default suggestions for American Express, Nationwide, and Revolut account patterns.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
@@ -86,6 +91,15 @@ Copy `.env.example` to `.env.local` and fill Supabase values when database-backe
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+NEXT_PUBLIC_APP_BASE_URL=
+APP_BASE_URL=
+APP_ENV=staging
+OPEN_BANKING_ENABLED=false
+AI_MONEY_COACH_ENABLED=false
+WEB_PUSH_ENABLED=false
+SCHEDULED_ALERTS_ENABLED=false
+MONEYHUB_SANDBOX_ENABLED=false
+MOCK_DATA_FALLBACK_ENABLED=true
 ```
 
 Do not commit real Supabase credentials.
@@ -576,6 +590,89 @@ Troubleshooting:
 - Cron rejected: check `CRON_SECRET`.
 - Duplicate alerts: check notification ID windows and source entity IDs before changing dedupe rules.
 
+## Staging Deployment
+
+Phase 11 adds safe staging readiness checks and deployment runbooks.
+
+Readiness:
+
+- Visit `/settings/system-readiness`.
+- Confirm Supabase, cron, base URL, optional Moneyhub sandbox, optional OpenAI, and optional Web Push checks.
+- The page shows labels, status, safe details, and remediation only. It must not show secret values.
+
+Vercel deployment steps:
+
+1. Create a Vercel project from this repository.
+2. Set staging environment variables in Vercel Project Settings.
+3. Keep service-role, Moneyhub, OpenAI, VAPID private key, and cron secret server-side.
+4. Deploy preview/staging.
+5. Run the smoke test checklist in `docs/staging-smoke-test.md`.
+
+Supabase project setup:
+
+1. Create a Supabase staging project.
+2. Add the staging site URL and `/auth/callback` to Auth redirect URLs.
+3. Apply migrations.
+4. Confirm RLS policies are enabled.
+5. Use fake demo data only.
+
+Migration runner guidance:
+
+```bash
+supabase db push
+supabase migration list
+```
+
+Seed fake demo data only through reviewed local scripts or Supabase SQL snippets. Do not seed real financial data. Clear demo data before re-running sensitive tests. Verify RLS by checking every user-owned table has `user_id`, RLS enabled, and policies scoped to `auth.uid() = user_id`.
+
+Moneyhub sandbox setup:
+
+- Set the staging callback URL to `/api/bank-connections/callback`.
+- Set the staging webhook URL to `/api/bank-connections/webhook/moneyhub`.
+- Use sandbox credentials only.
+- Confirm callback and webhook failures remain provider-safe.
+
+OpenAI setup:
+
+- Set the OpenAI key server-side only.
+- Keep OpenAI optional; deterministic fallback must still work.
+- Confirm no raw provider payloads or unnecessary transaction-level data are sent.
+
+VAPID setup:
+
+- Generate VAPID keys with a trusted local tool or provider dashboard.
+- Store the public key and private key in deployment environment variables.
+- Keep `WEB_PUSH_ENABLED=false` and `NOTIFICATION_DELIVERY_ENABLED=false` until staging push tests are planned.
+
+Cron setup:
+
+- Use `vercel.json` for Vercel Cron.
+- Supabase Cron may call the same HTTP routes.
+- Always send `CRON_SECRET`.
+- Confirm invalid secrets return 401.
+
+iPhone PWA test:
+
+- Open staging in Safari.
+- Tap Share -> Add to Home Screen.
+- Open from the Home Screen icon.
+- Enable notifications only from Settings.
+- Send a test notification.
+- Confirm external copy is privacy-safe.
+
+Rollback:
+
+- Keep the previous Vercel deployment available.
+- Revert to the previous deployment if smoke tests fail.
+- Roll back database changes only with a reviewed migration plan.
+- Rotate secrets if a staging secret is exposed.
+
+Supporting docs:
+
+- `docs/staging-smoke-test.md`
+- `docs/security-checklist.md`
+- `docs/deployment-checklist.md`
+
 ## Provider Abstraction
 
 Provider names supported by the model:
@@ -609,6 +706,12 @@ Open Banking sandbox placeholders:
 
 ```bash
 OPEN_BANKING_PROVIDER=moneyhub
+OPEN_BANKING_ENABLED=false
+AI_MONEY_COACH_ENABLED=false
+WEB_PUSH_ENABLED=false
+SCHEDULED_ALERTS_ENABLED=false
+MONEYHUB_SANDBOX_ENABLED=false
+MOCK_DATA_FALLBACK_ENABLED=true
 OPEN_BANKING_CLIENT_ID=
 OPEN_BANKING_CLIENT_SECRET=
 OPEN_BANKING_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback

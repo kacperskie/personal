@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Cable, ShieldCheck, ToggleLeft } from "lucide-react";
+import { Activity, Cable, ShieldCheck, ToggleLeft } from "lucide-react";
 import { NotificationPreferencesManager } from "@/components/notifications/notification-preferences-manager";
 import { PageHeader } from "@/components/page-header";
 import { InstallGuidance } from "@/components/pwa/install-guidance";
@@ -73,6 +73,21 @@ export default async function SettingsPage() {
               </dd>
             </div>
           </dl>
+        </article>
+
+        <article className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <Activity className="h-5 w-5 text-teal" aria-hidden="true" />
+          <h2 className="mt-4 text-base font-semibold text-ink">System readiness</h2>
+          <p className="mt-2 text-sm leading-6 text-ink/70">
+            Review safe staging checks for Supabase, Moneyhub sandbox, OpenAI, Web Push,
+            cron protection, redirects, and webhook setup.
+          </p>
+          <Link
+            href="/settings/system-readiness"
+            className="mt-4 inline-flex rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+          >
+            View readiness
+          </Link>
         </article>
       </section>
 

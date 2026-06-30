@@ -50,6 +50,47 @@ export default async function DashboardPage() {
     getSpendingAnomalies(),
     getTransactionEnrichments(),
   ]);
+
+  if (accounts.length === 0) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Empty dashboard"
+          title="Dashboard"
+          description="No finance data is available yet. Add accounts or manual entries to build the staging dashboard from real persisted records."
+        />
+        <section className="rounded-lg border border-line bg-white p-6 shadow-panel">
+          <h2 className="text-lg font-semibold text-ink">No accounts yet</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/65">
+            This state appears when Supabase is configured but the signed-in user has no
+            accounts or manual setup data. Mock fallback remains available for local
+            development when it is enabled.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <a
+              href="/accounts"
+              className="inline-flex min-h-10 items-center rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+            >
+              Review accounts
+            </a>
+            <a
+              href="/manual-entries"
+              className="inline-flex min-h-10 items-center rounded-lg border border-line px-4 py-2 text-sm font-semibold text-ink/70"
+            >
+              Add manual entry
+            </a>
+            <a
+              href="/settings/system-readiness"
+              className="inline-flex min-h-10 items-center rounded-lg border border-line px-4 py-2 text-sm font-semibold text-ink/70"
+            >
+              Check readiness
+            </a>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   const moneyCoachContext = await buildMoneyCoachContext({
     mode: "weekly_review",
     question: "Dashboard money coach summary",
