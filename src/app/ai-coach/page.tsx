@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/page-header";
 
 const promptExamples = [
   "What changed this month?",
-  "Can I afford a £300 purchase this weekend?",
+  "Can I afford a GBP 300 purchase this weekend?",
   "Which subscriptions should I review first?",
   "Why is eating out ahead of pace?",
 ];

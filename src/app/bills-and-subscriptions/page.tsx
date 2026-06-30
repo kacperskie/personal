@@ -1,7 +1,7 @@
 import { CalendarDays, Repeat, TriangleAlert } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { StatusPill } from "@/components/status-pill";
-import { recurringPayments } from "@/lib/mock-data";
+import { recurringPaymentSummary, recurringPayments } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/format";
 
 export default function BillsAndSubscriptionsPage() {
@@ -17,17 +17,23 @@ export default function BillsAndSubscriptionsPage() {
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <CalendarDays className="h-5 w-5 text-teal" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Confirmed bills</p>
-          <p className="mt-1 text-2xl font-semibold text-ink">5</p>
+          <p className="mt-1 text-2xl font-semibold text-ink">
+            {recurringPaymentSummary.confirmedBills}
+          </p>
         </div>
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <Repeat className="h-5 w-5 text-moss" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Subscriptions</p>
-          <p className="mt-1 text-2xl font-semibold text-ink">4</p>
+          <p className="mt-1 text-2xl font-semibold text-ink">
+            {recurringPaymentSummary.subscriptions}
+          </p>
         </div>
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <TriangleAlert className="h-5 w-5 text-saffron" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Needs review</p>
-          <p className="mt-1 text-2xl font-semibold text-ink">2</p>
+          <p className="mt-1 text-2xl font-semibold text-ink">
+            {recurringPaymentSummary.needsReview}
+          </p>
         </div>
       </section>
 

@@ -1,8 +1,22 @@
+import type {
+  Account,
+  Bill,
+  Budget,
+  BudgetPeriod,
+  Category,
+  Debt,
+  ManualFinanceItem,
+  SavingsGoal,
+  Subscription,
+  Transaction,
+} from "@/lib/domain";
+
 export type BudgetPaceStatus = "under pace" | "on pace" | "high" | "risk";
+export type Tone = "good" | "neutral" | "warning" | "risk";
 
 export type SafeToSpendInput = {
-  availableCash: number;
-  upcomingBillsBeforePayday: number;
+  currentCash: number;
+  billsDueBeforePayday: number;
   plannedSavingsBeforePayday: number;
   debtPaymentsBeforePayday: number;
   minimumBuffer: number;
@@ -10,16 +24,354 @@ export type SafeToSpendInput = {
   confirmedAdjustments?: number;
 };
 
-export function calculateSafeToSpend(input: SafeToSpendInput) {
+export type SpendByCategory = {
+  categoryId: string;
+  category: string;
+  spent: number;
+};
+
+export type BudgetHealthItem = {
+  categoryId: string;
+  category: string;
+  budget: number;
+  spent: number;
+  remaining: number;
+  usagePercentage: number;
+  forecast: number;
+  paceRatio: number;
+  status: BudgetPaceStatus;
+  tone: Tone;
+};
+
+export type UpcomingCommitment = {
+  id: string;
+  name: string;
+  dueDate: string;
+  amount: number;
+  currency: string;
+  type: string;
+  source: "bill" | "subscription" | "manual";
+};
+
+export type SavingsGoalProgress = {
+  goalId: string;
+  progressRatio: number;
+  progressPercentage: number;
+  remainingAmount: number;
+};
+
+export type DebtSummaryItem = {
+  id: string;
+  name: string;
+  balance: number;
+  minimumPayment: number;
+  apr: number | null;
+  source: "debt" | "manual";
+};
+
+export type DebtSummary = {
+  totalDebt: number;
+  totalMinimumPayment: number;
+  averageApr: number;
+  items: DebtSummaryItem[];
+};
+
+const toneByStatus: Record<BudgetPaceStatus, Tone> = {
+  "under pace": "good",
+  "on pace": "neutral",
+  high: "warning",
+  risk: "risk",
+};
+
+function isActiveStatus(status: string) {
+  return status === "active" || status === "confirmed" || status === "pending_review";
+}
+
+function isDateInRange(date: string | null, startDate: string, endDate: string) {
+  return Boolean(date && date >= startDate && date <= endDate);
+}
+
+function absoluteAmount(value: number) {
+  return Math.abs(value);
+}
+
+function manualItemAffectsCurrentCash(item: ManualFinanceItem) {
   return (
-    input.availableCash -
-    input.upcomingBillsBeforePayday -
+    item.includeInCashflow &&
+    isActiveStatus(item.status) &&
+    (item.type === "cash" || item.type === "offline_account") &&
+    item.direction === "asset"
+  );
+}
+
+function manualItemIsAsset(item: ManualFinanceItem) {
+  return (
+    item.includeInNetWorth &&
+    isActiveStatus(item.status) &&
+    (item.direction === "asset" || item.direction === "receivable")
+  );
+}
+
+function manualItemIsLiability(item: ManualFinanceItem) {
+  return (
+    item.includeInNetWorth &&
+    isActiveStatus(item.status) &&
+    (item.direction === "liability" || item.direction === "payable")
+  );
+}
+
+function manualItemIsCashflowOutflow(item: ManualFinanceItem) {
+  return (
+    item.includeInCashflow &&
+    isActiveStatus(item.status) &&
+    (item.direction === "expense" ||
+      item.direction === "payable" ||
+      item.direction === "liability")
+  );
+}
+
+export function calculateTotalCurrentCash(
+  accounts: Account[],
+  manualFinanceItems: ManualFinanceItem[] = [],
+) {
+  const accountCash = accounts
+    .filter((account) => account.includeInCash && isActiveStatus(account.status))
+    .reduce((total, account) => total + Math.max(account.balance, 0), 0);
+
+  const manualCash = manualFinanceItems
+    .filter(manualItemAffectsCurrentCash)
+    .reduce((total, item) => total + item.amount, 0);
+
+  return accountCash + manualCash;
+}
+
+export function getUpcomingManualCashflowItems(
+  manualFinanceItems: ManualFinanceItem[],
+  startDate: string,
+  endDate: string,
+) {
+  return manualFinanceItems
+    .filter(
+      (item) =>
+        item.includeInCashflow &&
+        isActiveStatus(item.status) &&
+        isDateInRange(item.dueDate, startDate, endDate),
+    )
+    .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+}
+
+export function getUpcomingBillItems(
+  bills: Bill[],
+  subscriptions: Subscription[],
+  manualFinanceItems: ManualFinanceItem[],
+  startDate: string,
+  endDate: string,
+): UpcomingCommitment[] {
+  const billItems: UpcomingCommitment[] = bills
+    .filter(
+      (bill) =>
+        bill.includeInCashflow &&
+        isActiveStatus(bill.status) &&
+        isDateInRange(bill.dueDate, startDate, endDate),
+    )
+    .map((bill) => ({
+      id: bill.id,
+      name: bill.name,
+      dueDate: bill.dueDate,
+      amount: bill.amount,
+      currency: bill.currency,
+      type: bill.essential ? "Essential bill" : "Bill",
+      source: "bill",
+    }));
+
+  const subscriptionItems: UpcomingCommitment[] = subscriptions
+    .filter(
+      (subscription) =>
+        subscription.includeInCashflow &&
+        isActiveStatus(subscription.status) &&
+        isDateInRange(subscription.dueDate, startDate, endDate),
+    )
+    .map((subscription) => ({
+      id: subscription.id,
+      name: subscription.name,
+      dueDate: subscription.dueDate,
+      amount: subscription.amount,
+      currency: subscription.currency,
+      type: "Subscription",
+      source: "subscription",
+    }));
+
+  const manualItems: UpcomingCommitment[] = manualFinanceItems
+    .filter(
+      (item) =>
+        item.includeInCashflow &&
+        isActiveStatus(item.status) &&
+        (item.type === "manual_bill" || item.type === "future_expense") &&
+        isDateInRange(item.dueDate, startDate, endDate),
+    )
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      dueDate: String(item.dueDate),
+      amount: item.amount,
+      currency: item.currency,
+      type: item.type === "future_expense" ? "Future expense" : "Manual bill",
+      source: "manual",
+    }));
+
+  return [...billItems, ...subscriptionItems, ...manualItems].sort((a, b) =>
+    a.dueDate.localeCompare(b.dueDate),
+  );
+}
+
+export function calculateBillsDueBeforePayday(
+  bills: Bill[],
+  subscriptions: Subscription[],
+  manualFinanceItems: ManualFinanceItem[],
+  startDate: string,
+  paydayDate: string,
+) {
+  return getUpcomingBillItems(
+    bills,
+    subscriptions,
+    manualFinanceItems,
+    startDate,
+    paydayDate,
+  ).reduce((total, item) => total + item.amount, 0);
+}
+
+export function calculateDebtPaymentsDueBeforePayday(
+  debts: Debt[],
+  manualFinanceItems: ManualFinanceItem[],
+  startDate: string,
+  paydayDate: string,
+) {
+  const debtPayments = debts
+    .filter(
+      (debt) =>
+        isActiveStatus(debt.status) && isDateInRange(debt.dueDate, startDate, paydayDate),
+    )
+    .reduce((total, debt) => total + debt.minimumPayment, 0);
+
+  const manualPayments = manualFinanceItems
+    .filter(
+      (item) =>
+        manualItemIsCashflowOutflow(item) &&
+        (item.direction === "liability" || item.direction === "payable") &&
+        isDateInRange(item.dueDate, startDate, paydayDate),
+    )
+    .reduce((total, item) => total + (item.minimumPayment ?? item.amount), 0);
+
+  return debtPayments + manualPayments;
+}
+
+export function calculateSafeToSpendAmount(input: SafeToSpendInput) {
+  return (
+    input.currentCash -
+    input.billsDueBeforePayday -
     input.plannedSavingsBeforePayday -
     input.debtPaymentsBeforePayday -
     input.minimumBuffer -
     input.reservedGoalContributions +
     (input.confirmedAdjustments ?? 0)
   );
+}
+
+export const calculateSafeToSpend = calculateSafeToSpendAmount;
+
+export function calculateMonthlyIncome(
+  transactions: Transaction[],
+  manualFinanceItems: ManualFinanceItem[],
+  period: BudgetPeriod,
+) {
+  const transactionIncome = transactions
+    .filter(
+      (transaction) =>
+        transaction.kind === "income" &&
+        transaction.amount > 0 &&
+        isDateInRange(transaction.date, period.startDate, period.endDate),
+    )
+    .reduce((total, transaction) => total + transaction.amount, 0);
+
+  const manualIncome = manualFinanceItems
+    .filter(
+      (item) =>
+        item.type === "manual_income" &&
+        item.direction === "income" &&
+        item.includeInCashflow &&
+        isActiveStatus(item.status) &&
+        isDateInRange(item.dueDate, period.startDate, period.endDate),
+    )
+    .reduce((total, item) => total + item.amount, 0);
+
+  return transactionIncome + manualIncome;
+}
+
+export function calculateMonthlySpending(
+  transactions: Transaction[],
+  manualFinanceItems: ManualFinanceItem[],
+  period: BudgetPeriod,
+) {
+  const transactionSpending = transactions
+    .filter(
+      (transaction) =>
+        transaction.kind === "expense" &&
+        transaction.amount < 0 &&
+        isDateInRange(transaction.date, period.startDate, period.endDate),
+    )
+    .reduce((total, transaction) => total + absoluteAmount(transaction.amount), 0);
+
+  const manualSpending = manualFinanceItems
+    .filter(
+      (item) =>
+        (item.type === "manual_bill" || item.type === "future_expense") &&
+        item.direction === "expense" &&
+        item.includeInCashflow &&
+        isActiveStatus(item.status) &&
+        isDateInRange(item.dueDate, period.startDate, period.endDate),
+    )
+    .reduce((total, item) => total + item.amount, 0);
+
+  return transactionSpending + manualSpending;
+}
+
+export function calculateSpendByCategory(
+  transactions: Transaction[],
+  categories: Category[],
+  period: BudgetPeriod,
+): SpendByCategory[] {
+  const spendByCategoryId = transactions
+    .filter(
+      (transaction) =>
+        transaction.kind === "expense" &&
+        transaction.amount < 0 &&
+        isDateInRange(transaction.date, period.startDate, period.endDate),
+    )
+    .reduce<Record<string, number>>((groups, transaction) => {
+      groups[transaction.categoryId] =
+        (groups[transaction.categoryId] ?? 0) + absoluteAmount(transaction.amount);
+      return groups;
+    }, {});
+
+  return Object.entries(spendByCategoryId)
+    .map(([categoryId, spent]) => ({
+      categoryId,
+      category: categories.find((category) => category.id === categoryId)?.name ?? "Other",
+      spent,
+    }))
+    .sort((a, b) => b.spent - a.spent);
+}
+
+export function calculateBudgetRemaining(budget: Budget, spent: number) {
+  return budget.amount - spent;
+}
+
+export function calculateBudgetUsagePercentage(budget: Budget, spent: number) {
+  if (budget.amount <= 0) {
+    return 0;
+  }
+
+  return spent / budget.amount;
 }
 
 export function calculateBudgetPace(
@@ -57,6 +409,41 @@ export function calculateBudgetPace(
   return { expectedSpendToDate, paceRatio, status: "risk" };
 }
 
+export function calculateBudgetHealth(
+  budgets: Budget[],
+  transactions: Transaction[],
+  categories: Category[],
+  period: BudgetPeriod,
+  elapsedBudgetPeriodRatio: number,
+): BudgetHealthItem[] {
+  const spendByCategory = calculateSpendByCategory(transactions, categories, period);
+
+  return budgets.map((budget) => {
+    const category =
+      categories.find((candidate) => candidate.id === budget.categoryId)?.name ?? "Other";
+    const spent =
+      spendByCategory.find((spend) => spend.categoryId === budget.categoryId)?.spent ?? 0;
+    const remaining = calculateBudgetRemaining(budget, spent);
+    const usagePercentage = calculateBudgetUsagePercentage(budget, spent);
+    const pace = calculateBudgetPace(spent, budget.amount, elapsedBudgetPeriodRatio);
+    const forecast =
+      elapsedBudgetPeriodRatio <= 0 ? spent : spent / elapsedBudgetPeriodRatio;
+
+    return {
+      categoryId: budget.categoryId,
+      category,
+      budget: budget.amount,
+      spent,
+      remaining,
+      usagePercentage,
+      forecast,
+      paceRatio: pace.paceRatio,
+      status: pace.status,
+      tone: toneByStatus[pace.status],
+    };
+  });
+}
+
 export function calculateProjectedMonthEndBalance({
   currentCash,
   expectedIncome,
@@ -67,4 +454,124 @@ export function calculateProjectedMonthEndBalance({
   plannedOutflows: number;
 }) {
   return currentCash + expectedIncome - plannedOutflows;
+}
+
+export function calculateSavingsGoalProgress(goal: SavingsGoal): SavingsGoalProgress {
+  const progressRatio =
+    goal.targetAmount <= 0 ? 0 : Math.min(goal.currentAmount / goal.targetAmount, 1);
+
+  return {
+    goalId: goal.id,
+    progressRatio,
+    progressPercentage: progressRatio * 100,
+    remainingAmount: Math.max(goal.targetAmount - goal.currentAmount, 0),
+  };
+}
+
+export function calculateTotalAssets(
+  accounts: Account[],
+  manualFinanceItems: ManualFinanceItem[],
+) {
+  const accountAssets = accounts
+    .filter((account) => account.includeInNetWorth && isActiveStatus(account.status))
+    .reduce((total, account) => total + Math.max(account.balance, 0), 0);
+
+  const manualAssets = manualFinanceItems
+    .filter(manualItemIsAsset)
+    .reduce((total, item) => total + item.amount, 0);
+
+  return accountAssets + manualAssets;
+}
+
+export function calculateTotalLiabilities(
+  accounts: Account[],
+  debts: Debt[],
+  manualFinanceItems: ManualFinanceItem[],
+) {
+  const debtAccountIds = new Set(
+    debts
+      .filter((debt) => debt.includeInNetWorth && isActiveStatus(debt.status))
+      .map((debt) => debt.accountId)
+      .filter(Boolean),
+  );
+
+  const accountLiabilities = accounts
+    .filter(
+      (account) =>
+        account.includeInNetWorth &&
+        isActiveStatus(account.status) &&
+        account.balance < 0 &&
+        !debtAccountIds.has(account.id),
+    )
+    .reduce((total, account) => total + absoluteAmount(account.balance), 0);
+
+  const debtLiabilities = debts
+    .filter((debt) => debt.includeInNetWorth && isActiveStatus(debt.status))
+    .reduce((total, debt) => total + debt.balance, 0);
+
+  const manualLiabilities = manualFinanceItems
+    .filter(manualItemIsLiability)
+    .reduce((total, item) => total + item.amount, 0);
+
+  return accountLiabilities + debtLiabilities + manualLiabilities;
+}
+
+export function calculateNetWorth(
+  accounts: Account[],
+  debts: Debt[],
+  manualFinanceItems: ManualFinanceItem[],
+) {
+  return (
+    calculateTotalAssets(accounts, manualFinanceItems) -
+    calculateTotalLiabilities(accounts, debts, manualFinanceItems)
+  );
+}
+
+export function calculateDebtSummary(
+  debts: Debt[],
+  manualFinanceItems: ManualFinanceItem[],
+): DebtSummary {
+  const debtItems: DebtSummaryItem[] = debts
+    .filter((debt) => isActiveStatus(debt.status))
+    .map((debt) => ({
+      id: debt.id,
+      name: debt.name,
+      balance: debt.balance,
+      minimumPayment: debt.minimumPayment,
+      apr: debt.apr,
+      source: "debt",
+    }));
+
+  const manualDebtItems: DebtSummaryItem[] = manualFinanceItems
+    .filter(
+      (item) =>
+        isActiveStatus(item.status) &&
+        (item.direction === "liability" || item.direction === "payable"),
+    )
+    .map((item) => ({
+      id: item.id,
+      name: item.name,
+      balance: item.amount,
+      minimumPayment: item.minimumPayment ?? (item.direction === "payable" ? item.amount : 0),
+      apr: item.apr,
+      source: "manual",
+    }));
+
+  const items = [...debtItems, ...manualDebtItems];
+  const totalDebt = items.reduce((total, item) => total + item.balance, 0);
+  const totalMinimumPayment = items.reduce(
+    (total, item) => total + item.minimumPayment,
+    0,
+  );
+  const aprWeightedBalance = items.reduce(
+    (total, item) => total + item.balance * (item.apr ?? 0),
+    0,
+  );
+
+  return {
+    totalDebt,
+    totalMinimumPayment,
+    averageApr: totalDebt === 0 ? 0 : aprWeightedBalance / totalDebt,
+    items,
+  };
 }

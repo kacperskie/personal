@@ -9,7 +9,12 @@ import {
 import { BudgetHealthChart } from "@/components/budget-health-chart";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
-import { budgetHealth, dashboardSummary, upcomingBills } from "@/lib/mock-data";
+import {
+  budgetHealth,
+  dashboardInsight,
+  dashboardSummary,
+  upcomingBills,
+} from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/format";
 
 export default function DashboardPage() {
@@ -101,7 +106,7 @@ export default function DashboardPage() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-ink">{bill.name}</p>
                   <p className="text-xs text-ink/55">
-                    {bill.dueDate} · {bill.type}
+                    {bill.dueDateLabel} - {bill.type}
                   </p>
                 </div>
                 <p className="shrink-0 text-sm font-semibold text-ink">
@@ -120,19 +125,16 @@ export default function DashboardPage() {
               AI money coach summary
             </p>
             <h2 className="mt-2 text-xl font-semibold text-ink">
-              Spending is on track, but two flexible categories need review.
+              {dashboardInsight.title}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-ink/70">
-              Based on the mock data, safe-to-spend remains positive after bills,
-              planned savings, debt payments, and the minimum buffer. Eating out and
-              personal spending are running ahead of pace, so the practical next step
-              is to cap discretionary spend until payday.
+              {dashboardInsight.summary}
             </p>
           </div>
           <div className="rounded-lg border border-teal/20 bg-white p-4">
             <p className="text-sm font-semibold text-ink">Next action</p>
             <p className="mt-2 text-sm text-ink/70">
-              Review the last 7 days of flexible spending before changing any budget.
+              {dashboardInsight.nextAction}
             </p>
           </div>
         </div>

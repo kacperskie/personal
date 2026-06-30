@@ -10,10 +10,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { BudgetCategory } from "@/lib/mock-data";
+import type { BudgetHealthItem } from "@/lib/finance";
 import { formatCurrency } from "@/lib/format";
 
-export function BudgetHealthChart({ data }: { data: BudgetCategory[] }) {
+export function BudgetHealthChart({ data }: { data: BudgetHealthItem[] }) {
   return (
     <div className="h-80 w-full" aria-label="Budget health chart">
       <ResponsiveContainer width="100%" height="100%">
@@ -24,7 +24,7 @@ export function BudgetHealthChart({ data }: { data: BudgetCategory[] }) {
             tickLine={false}
             axisLine={false}
             tick={{ fontSize: 12 }}
-            tickFormatter={(value) => `£${Number(value)}`}
+            tickFormatter={(value) => formatCurrency(Number(value))}
           />
           <Tooltip
             formatter={(value) => formatCurrency(Number(value))}
