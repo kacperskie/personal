@@ -6,10 +6,18 @@ import type {
   AppNotification,
   Category,
   ManualFinanceItem,
+  MerchantRule,
   NotificationPreference,
   PushSubscriptionRecord,
+  RecurringPaymentCandidate,
   SavingsGoal,
+  SpendingAnomaly,
   Transaction,
+  TransactionEnrichment,
+  DetectedBill,
+  DetectedSubscription,
+  CashflowEvent,
+  Subscription,
 } from "@/lib/domain";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -21,11 +29,22 @@ type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"];
 type CategoryRow = Database["public"]["Tables"]["categories"]["Row"];
 type BudgetRow = Database["public"]["Tables"]["budgets"]["Row"];
 type BillRow = Database["public"]["Tables"]["bills"]["Row"];
+type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
 type SavingsGoalRow = Database["public"]["Tables"]["savings_goals"]["Row"];
 type NotificationPreferenceRow =
   Database["public"]["Tables"]["notification_preferences"]["Row"];
 type AppNotificationRow = Database["public"]["Tables"]["app_notifications"]["Row"];
 type PushSubscriptionRow = Database["public"]["Tables"]["push_subscriptions"]["Row"];
+type MerchantRuleRow = Database["public"]["Tables"]["merchant_rules"]["Row"];
+type TransactionEnrichmentRow =
+  Database["public"]["Tables"]["transaction_enrichments"]["Row"];
+type RecurringPaymentCandidateRow =
+  Database["public"]["Tables"]["recurring_payment_candidates"]["Row"];
+type DetectedBillRow = Database["public"]["Tables"]["detected_bills"]["Row"];
+type DetectedSubscriptionRow =
+  Database["public"]["Tables"]["detected_subscriptions"]["Row"];
+type SpendingAnomalyRow = Database["public"]["Tables"]["spending_anomalies"]["Row"];
+type CashflowEventRow = Database["public"]["Tables"]["cashflow_events"]["Row"];
 
 export function accountFromRow(row: AccountRow): Account {
   return {
@@ -260,6 +279,25 @@ export function billFromRow(row: BillRow): Bill {
   };
 }
 
+export function subscriptionFromRow(row: SubscriptionRow): Subscription {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    amount: row.amount,
+    currency: row.currency,
+    dueDate: row.due_date,
+    recurrence: row.recurrence,
+    categoryId: row.category_id,
+    accountId: row.account_id,
+    includeInCashflow: row.include_in_cashflow,
+    status: row.status,
+    reviewDate: row.review_date,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 export function savingsGoalFromRow(row: SavingsGoalRow): SavingsGoal {
   return {
     id: row.id,
@@ -273,6 +311,256 @@ export function savingsGoalFromRow(row: SavingsGoalRow): SavingsGoal {
     monthlyContribution: row.monthly_contribution,
     includeInNetWorth: row.include_in_net_worth,
     status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function merchantRuleFromRow(row: MerchantRuleRow): MerchantRule {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    matchPattern: row.match_pattern,
+    normalisedMerchantName: row.normalised_merchant_name,
+    merchantGroup: row.merchant_group,
+    category: row.category,
+    subcategory: row.subcategory,
+    priority: row.priority,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function merchantRuleToRow(rule: MerchantRule, userId: string): MerchantRuleRow {
+  return {
+    id: rule.id,
+    user_id: userId,
+    match_pattern: rule.matchPattern,
+    normalised_merchant_name: rule.normalisedMerchantName,
+    merchant_group: rule.merchantGroup,
+    category: rule.category,
+    subcategory: rule.subcategory,
+    priority: rule.priority,
+    status: rule.status,
+    created_at: rule.createdAt,
+    updated_at: rule.updatedAt,
+  };
+}
+
+export function transactionEnrichmentFromRow(
+  row: TransactionEnrichmentRow,
+): TransactionEnrichment {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    transactionId: row.transaction_id,
+    normalisedMerchantName: row.normalised_merchant_name,
+    merchantGroup: row.merchant_group,
+    category: row.category,
+    subcategory: row.subcategory,
+    confidenceScore: row.confidence_score,
+    enrichmentSource: row.enrichment_source,
+    userReviewed: row.user_reviewed,
+    excludedFromSpending: row.excluded_from_spending,
+    internalTransfer: row.internal_transfer,
+    billCandidate: row.bill_candidate,
+    subscriptionCandidate: row.subscription_candidate,
+    recurringCandidate: row.recurring_candidate,
+    reviewStatus: row.review_status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function transactionEnrichmentToRow(
+  enrichment: TransactionEnrichment,
+  userId: string,
+): TransactionEnrichmentRow {
+  return {
+    id: enrichment.id,
+    user_id: userId,
+    transaction_id: enrichment.transactionId,
+    normalised_merchant_name: enrichment.normalisedMerchantName,
+    merchant_group: enrichment.merchantGroup,
+    category: enrichment.category,
+    subcategory: enrichment.subcategory,
+    confidence_score: enrichment.confidenceScore,
+    enrichment_source: enrichment.enrichmentSource,
+    user_reviewed: enrichment.userReviewed,
+    excluded_from_spending: enrichment.excludedFromSpending,
+    internal_transfer: enrichment.internalTransfer,
+    bill_candidate: enrichment.billCandidate,
+    subscription_candidate: enrichment.subscriptionCandidate,
+    recurring_candidate: enrichment.recurringCandidate,
+    review_status: enrichment.reviewStatus,
+    created_at: enrichment.createdAt,
+    updated_at: enrichment.updatedAt,
+  };
+}
+
+export function recurringPaymentCandidateFromRow(
+  row: RecurringPaymentCandidateRow,
+): RecurringPaymentCandidate {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    merchant: row.merchant,
+    amountEstimate: row.amount_estimate,
+    frequency: row.frequency,
+    nextExpectedDate: row.next_expected_date,
+    confidence: row.confidence,
+    linkedAccountId: row.linked_account_id,
+    latestTransactionDate: row.latest_transaction_date,
+    transactionIds: row.transaction_ids,
+    candidateType: row.candidate_type,
+    status: row.status,
+    reviewed: row.reviewed,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function recurringPaymentCandidateToRow(
+  candidate: RecurringPaymentCandidate,
+  userId: string,
+): RecurringPaymentCandidateRow {
+  return {
+    id: candidate.id,
+    user_id: userId,
+    merchant: candidate.merchant,
+    amount_estimate: candidate.amountEstimate,
+    frequency: candidate.frequency,
+    next_expected_date: candidate.nextExpectedDate,
+    confidence: candidate.confidence,
+    linked_account_id: candidate.linkedAccountId,
+    latest_transaction_date: candidate.latestTransactionDate,
+    transaction_ids: candidate.transactionIds,
+    candidate_type: candidate.candidateType,
+    status: candidate.status,
+    reviewed: candidate.reviewed,
+    created_at: candidate.createdAt,
+    updated_at: candidate.updatedAt,
+  };
+}
+
+export function detectedBillFromRow(row: DetectedBillRow): DetectedBill {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    merchant: row.merchant,
+    amountEstimate: row.amount_estimate,
+    frequency: row.frequency,
+    nextDueDate: row.next_due_date,
+    paymentAccountId: row.payment_account_id,
+    category: row.category,
+    confidence: row.confidence,
+    source: row.source,
+    status: row.status,
+    reviewed: row.reviewed,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function detectedBillToRow(bill: DetectedBill, userId: string): DetectedBillRow {
+  return {
+    id: bill.id,
+    user_id: userId,
+    name: bill.name,
+    merchant: bill.merchant,
+    amount_estimate: bill.amountEstimate,
+    frequency: bill.frequency,
+    next_due_date: bill.nextDueDate,
+    payment_account_id: bill.paymentAccountId,
+    category: bill.category,
+    confidence: bill.confidence,
+    source: bill.source,
+    status: bill.status,
+    reviewed: bill.reviewed,
+    created_at: bill.createdAt,
+    updated_at: bill.updatedAt,
+  };
+}
+
+export function detectedSubscriptionFromRow(
+  row: DetectedSubscriptionRow,
+): DetectedSubscription {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    merchant: row.merchant,
+    amountEstimate: row.amount_estimate,
+    frequency: row.frequency,
+    nextExpectedDate: row.next_expected_date,
+    paymentAccountId: row.payment_account_id,
+    category: row.category,
+    confidence: row.confidence,
+    status: row.status,
+    reviewed: row.reviewed,
+    priceChangeDetected: row.price_change_detected,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function detectedSubscriptionToRow(
+  subscription: DetectedSubscription,
+  userId: string,
+): DetectedSubscriptionRow {
+  return {
+    id: subscription.id,
+    user_id: userId,
+    name: subscription.name,
+    merchant: subscription.merchant,
+    amount_estimate: subscription.amountEstimate,
+    frequency: subscription.frequency,
+    next_expected_date: subscription.nextExpectedDate,
+    payment_account_id: subscription.paymentAccountId,
+    category: subscription.category,
+    confidence: subscription.confidence,
+    status: subscription.status,
+    reviewed: subscription.reviewed,
+    price_change_detected: subscription.priceChangeDetected,
+    created_at: subscription.createdAt,
+    updated_at: subscription.updatedAt,
+  };
+}
+
+export function spendingAnomalyFromRow(row: SpendingAnomalyRow): SpendingAnomaly {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    title: row.title,
+    description: row.description,
+    severity: row.severity,
+    transactionIds: row.transaction_ids,
+    merchant: row.merchant,
+    category: row.category,
+    amount: row.amount,
+    expectedAmount: row.expected_amount,
+    detectedAt: row.detected_at,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function cashflowEventFromRow(row: CashflowEventRow): CashflowEvent {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    date: row.date,
+    name: row.name,
+    amount: row.amount,
+    currency: row.currency,
+    direction: row.direction,
+    source: row.source,
+    accountId: row.account_id,
+    includeInCashflow: row.include_in_cashflow,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

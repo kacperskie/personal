@@ -9,6 +9,8 @@ import type {
   ConsentStatus,
   CurrencyCode,
   EntityStatus,
+  EnrichmentSource,
+  FinanceCategory,
   ManualFinanceDirection,
   ManualFinanceItemType,
   NotificationChannel,
@@ -18,8 +20,11 @@ import type {
   ProviderWebhookEventType,
   ProviderWebhookProcessingStatus,
   Recurrence,
+  RecurringPaymentCandidateType,
+  SpendingAnomalyType,
   SyncJobScope,
   SyncJobStatus,
+  TransactionReviewStatus,
 } from "@/lib/domain";
 
 export type Json =
@@ -266,6 +271,32 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["bills"]["Row"]>;
         Relationships: [];
       };
+      subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          amount: number;
+          currency: CurrencyCode;
+          due_date: string;
+          recurrence: Recurrence;
+          category_id: string;
+          account_id: string | null;
+          include_in_cashflow: boolean;
+          status: EntityStatus;
+          review_date: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["subscriptions"]["Row"]> & {
+          user_id: string;
+          name: string;
+          amount: number;
+          due_date: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["subscriptions"]["Row"]>;
+        Relationships: [];
+      };
       savings_goals: {
         Row: {
           id: string;
@@ -458,6 +489,204 @@ export type Database = {
           idempotency_key: string;
         };
         Update: Partial<Database["public"]["Tables"]["sync_jobs"]["Row"]>;
+        Relationships: [];
+      };
+      merchant_rules: {
+        Row: {
+          id: string;
+          user_id: string;
+          match_pattern: string;
+          normalised_merchant_name: string;
+          merchant_group: string | null;
+          category: FinanceCategory;
+          subcategory: string | null;
+          priority: number;
+          status: EntityStatus;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["merchant_rules"]["Row"]> & {
+          user_id: string;
+          match_pattern: string;
+          normalised_merchant_name: string;
+          category: FinanceCategory;
+        };
+        Update: Partial<Database["public"]["Tables"]["merchant_rules"]["Row"]>;
+        Relationships: [];
+      };
+      transaction_enrichments: {
+        Row: {
+          id: string;
+          user_id: string;
+          transaction_id: string;
+          normalised_merchant_name: string;
+          merchant_group: string | null;
+          category: FinanceCategory;
+          subcategory: string | null;
+          confidence_score: number;
+          enrichment_source: EnrichmentSource;
+          user_reviewed: boolean;
+          excluded_from_spending: boolean;
+          internal_transfer: boolean;
+          bill_candidate: boolean;
+          subscription_candidate: boolean;
+          recurring_candidate: boolean;
+          review_status: TransactionReviewStatus;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["transaction_enrichments"]["Row"]> & {
+          user_id: string;
+          transaction_id: string;
+          normalised_merchant_name: string;
+          category: FinanceCategory;
+        };
+        Update: Partial<Database["public"]["Tables"]["transaction_enrichments"]["Row"]>;
+        Relationships: [];
+      };
+      recurring_payment_candidates: {
+        Row: {
+          id: string;
+          user_id: string;
+          merchant: string;
+          amount_estimate: number;
+          frequency: Recurrence["frequency"];
+          next_expected_date: string;
+          confidence: number;
+          linked_account_id: string;
+          latest_transaction_date: string;
+          transaction_ids: string[];
+          candidate_type: RecurringPaymentCandidateType;
+          status: TransactionReviewStatus;
+          reviewed: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["recurring_payment_candidates"]["Row"]> & {
+          user_id: string;
+          merchant: string;
+          amount_estimate: number;
+          frequency: Recurrence["frequency"];
+          next_expected_date: string;
+          linked_account_id: string;
+          latest_transaction_date: string;
+          candidate_type: RecurringPaymentCandidateType;
+        };
+        Update: Partial<Database["public"]["Tables"]["recurring_payment_candidates"]["Row"]>;
+        Relationships: [];
+      };
+      detected_bills: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          merchant: string;
+          amount_estimate: number;
+          frequency: Recurrence["frequency"];
+          next_due_date: string;
+          payment_account_id: string | null;
+          category: FinanceCategory;
+          confidence: number;
+          source: "recurring_detection" | "manual_review" | "rule";
+          status: TransactionReviewStatus | "confirmed" | "inactive";
+          reviewed: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["detected_bills"]["Row"]> & {
+          user_id: string;
+          name: string;
+          merchant: string;
+          amount_estimate: number;
+          frequency: Recurrence["frequency"];
+          next_due_date: string;
+          category: FinanceCategory;
+          source: "recurring_detection" | "manual_review" | "rule";
+        };
+        Update: Partial<Database["public"]["Tables"]["detected_bills"]["Row"]>;
+        Relationships: [];
+      };
+      detected_subscriptions: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          merchant: string;
+          amount_estimate: number;
+          frequency: Recurrence["frequency"];
+          next_expected_date: string;
+          payment_account_id: string | null;
+          category: FinanceCategory;
+          confidence: number;
+          status: TransactionReviewStatus | "confirmed" | "inactive";
+          reviewed: boolean;
+          price_change_detected: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["detected_subscriptions"]["Row"]> & {
+          user_id: string;
+          name: string;
+          merchant: string;
+          amount_estimate: number;
+          frequency: Recurrence["frequency"];
+          next_expected_date: string;
+          category: FinanceCategory;
+        };
+        Update: Partial<Database["public"]["Tables"]["detected_subscriptions"]["Row"]>;
+        Relationships: [];
+      };
+      spending_anomalies: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: SpendingAnomalyType;
+          title: string;
+          description: string;
+          severity: NotificationSeverity;
+          transaction_ids: string[];
+          merchant: string | null;
+          category: FinanceCategory | null;
+          amount: number | null;
+          expected_amount: number | null;
+          detected_at: string;
+          status: TransactionReviewStatus;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["spending_anomalies"]["Row"]> & {
+          user_id: string;
+          type: SpendingAnomalyType;
+          title: string;
+          description: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["spending_anomalies"]["Row"]>;
+        Relationships: [];
+      };
+      cashflow_events: {
+        Row: {
+          id: string;
+          user_id: string;
+          date: string;
+          name: string;
+          amount: number;
+          currency: CurrencyCode;
+          direction: "inflow" | "outflow";
+          source: "bill" | "subscription" | "manual" | "income";
+          account_id: string | null;
+          include_in_cashflow: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["cashflow_events"]["Row"]> & {
+          user_id: string;
+          date: string;
+          name: string;
+          amount: number;
+          direction: "inflow" | "outflow";
+          source: "bill" | "subscription" | "manual" | "income";
+        };
+        Update: Partial<Database["public"]["Tables"]["cashflow_events"]["Row"]>;
         Relationships: [];
       };
       audit_log: {

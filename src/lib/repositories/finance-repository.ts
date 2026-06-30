@@ -4,9 +4,17 @@ import type {
   Bill,
   Budget,
   Category,
+  DetectedBill,
+  DetectedSubscription,
   ManualFinanceItem,
+  MerchantRule,
   ProviderSyncEvent,
+  RecurringPaymentCandidate,
   SavingsGoal,
+  SpendingAnomaly,
+  Subscription,
+  TransactionEnrichment,
+  CashflowEvent,
   Transaction,
 } from "@/lib/domain";
 import {
@@ -17,6 +25,7 @@ import {
   mockCategories,
   mockManualFinanceItems,
   mockSavingsGoals,
+  mockSubscriptions,
   mockTransactionRecords,
 } from "@/lib/mock-data";
 import {
@@ -27,12 +36,35 @@ import {
   billFromRow,
   budgetFromRow,
   categoryFromRow,
+  cashflowEventFromRow,
+  detectedBillFromRow,
+  detectedBillToRow,
+  detectedSubscriptionFromRow,
+  detectedSubscriptionToRow,
   manualFinanceItemFromRow,
   manualFinanceItemToRow,
+  merchantRuleFromRow,
+  merchantRuleToRow,
+  recurringPaymentCandidateFromRow,
   savingsGoalFromRow,
+  spendingAnomalyFromRow,
+  subscriptionFromRow,
+  transactionEnrichmentFromRow,
+  transactionEnrichmentToRow,
   transactionFromRow,
 } from "@/lib/repositories/mappers";
 import { mergeSyncedTransaction } from "@/lib/bank-providers/provider-mappers";
+import {
+  approveRecurringCandidate,
+  buildCashflowEvents,
+  defaultMerchantRules,
+  detectBillsFromCandidates,
+  detectRecurringPaymentCandidates,
+  detectSpendingAnomalies,
+  detectSubscriptionsFromCandidates,
+  dismissRecurringCandidate,
+  enrichTransactionSet,
+} from "@/lib/transaction-intelligence";
 import { createAuditEvent } from "@/lib/repositories/audit";
 import type { AuditEventInput } from "@/lib/repositories/audit";
 import {
@@ -42,6 +74,14 @@ import {
   type ManualFinanceItemInput,
 } from "@/lib/repositories/validation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+const fallbackMerchantRules = new Map<string, MerchantRule>(
+  defaultMerchantRules.map((rule) => [rule.id, rule]),
+);
+const fallbackRecurringCandidates = new Map<string, RecurringPaymentCandidate>();
+const fallbackDetectedBills = new Map<string, DetectedBill>();
+const fallbackDetectedSubscriptions = new Map<string, DetectedSubscription>();
+const fallbackEnrichments = new Map<string, TransactionEnrichment>();
 
 async function getAuthenticatedContext() {
   const supabase = await createSupabaseServerClient();
@@ -667,6 +707,25 @@ export async function getBills(): Promise<Bill[]> {
   return data.map(billFromRow);
 }
 
+export async function getSubscriptions(): Promise<Subscription[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return mockSubscriptions;
+  }
+
+  const { data, error } = await context.supabase
+    .from("subscriptions")
+    .select("*")
+    .order("due_date");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(subscriptionFromRow);
+}
+
 export async function getSavingsGoals(): Promise<SavingsGoal[]> {
   const context = await getAuthenticatedContext();
 
@@ -684,4 +743,380 @@ export async function getSavingsGoals(): Promise<SavingsGoal[]> {
   }
 
   return data.map(savingsGoalFromRow);
+}
+
+export async function getMerchantRules(): Promise<MerchantRule[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return Array.from(fallbackMerchantRules.values());
+  }
+
+  const { data, error } = await context.supabase
+    .from("merchant_rules")
+    .select("*")
+    .order("priority");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(merchantRuleFromRow);
+}
+
+export async function upsertMerchantRule(rule: MerchantRule): Promise<MerchantRule> {
+  const context = await getAuthenticatedContext();
+  const updatedRule = { ...rule, updatedAt: new Date().toISOString() };
+
+  if (!context) {
+    fallbackMerchantRules.set(updatedRule.id, updatedRule);
+    return updatedRule;
+  }
+
+  const { data, error } = await context.supabase
+    .from("merchant_rules")
+    .upsert(merchantRuleToRow(updatedRule, context.userId))
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return merchantRuleFromRow(data);
+}
+
+export async function enrichTransactions(
+  transactions?: Transaction[],
+): Promise<TransactionEnrichment[]> {
+  const sourceTransactions = transactions ?? (await getTransactions());
+  const [accounts, merchantRules] = await Promise.all([getAccounts(), getMerchantRules()]);
+  const enrichments = enrichTransactionSet(sourceTransactions, accounts, merchantRules);
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    enrichments.forEach((enrichment) => fallbackEnrichments.set(enrichment.id, enrichment));
+    return enrichments;
+  }
+
+  const { data, error } = await context.supabase
+    .from("transaction_enrichments")
+    .upsert(
+      enrichments.map((enrichment) =>
+        transactionEnrichmentToRow({ ...enrichment, userId: context.userId }, context.userId),
+      ),
+    )
+    .select();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(transactionEnrichmentFromRow);
+}
+
+export async function getTransactionEnrichments(): Promise<TransactionEnrichment[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    if (fallbackEnrichments.size === 0) {
+      await enrichTransactions(mockTransactionRecords);
+    }
+
+    return Array.from(fallbackEnrichments.values());
+  }
+
+  const { data, error } = await context.supabase
+    .from("transaction_enrichments")
+    .select("*")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (data.length === 0) {
+    return enrichTransactions();
+  }
+
+  return data.map(transactionEnrichmentFromRow);
+}
+
+export async function upsertTransactionEnrichment(
+  enrichment: TransactionEnrichment,
+): Promise<TransactionEnrichment> {
+  const context = await getAuthenticatedContext();
+  const updated = { ...enrichment, updatedAt: new Date().toISOString() };
+
+  if (!context) {
+    fallbackEnrichments.set(updated.id, updated);
+    return updated;
+  }
+
+  const { data, error } = await context.supabase
+    .from("transaction_enrichments")
+    .upsert(transactionEnrichmentToRow(updated, context.userId))
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return transactionEnrichmentFromRow(data);
+}
+
+export async function getRecurringPaymentCandidates(): Promise<RecurringPaymentCandidate[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    if (fallbackRecurringCandidates.size === 0) {
+      const candidates = detectRecurringPaymentCandidates(
+        mockTransactionRecords,
+        await getTransactionEnrichments(),
+      );
+      candidates.forEach((candidate) => fallbackRecurringCandidates.set(candidate.id, candidate));
+    }
+
+    return Array.from(fallbackRecurringCandidates.values());
+  }
+
+  const { data, error } = await context.supabase
+    .from("recurring_payment_candidates")
+    .select("*")
+    .order("next_expected_date");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(recurringPaymentCandidateFromRow);
+}
+
+export async function approveRecurringPaymentCandidate(
+  id: string,
+): Promise<RecurringPaymentCandidate | null> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    const candidate =
+      fallbackRecurringCandidates.get(id) ??
+      (await getRecurringPaymentCandidates()).find((item) => item.id === id);
+
+    if (!candidate) {
+      return null;
+    }
+
+    const approved = approveRecurringCandidate(candidate);
+    fallbackRecurringCandidates.set(id, approved);
+    return approved;
+  }
+
+  const { data, error } = await context.supabase
+    .from("recurring_payment_candidates")
+    .update({ status: "approved", reviewed: true, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return recurringPaymentCandidateFromRow(data);
+}
+
+export async function dismissRecurringPaymentCandidate(
+  id: string,
+): Promise<RecurringPaymentCandidate | null> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    const candidate =
+      fallbackRecurringCandidates.get(id) ??
+      (await getRecurringPaymentCandidates()).find((item) => item.id === id);
+
+    if (!candidate) {
+      return null;
+    }
+
+    const dismissed = dismissRecurringCandidate(candidate);
+    fallbackRecurringCandidates.set(id, dismissed);
+    return dismissed;
+  }
+
+  const { data, error } = await context.supabase
+    .from("recurring_payment_candidates")
+    .update({ status: "dismissed", reviewed: true, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return recurringPaymentCandidateFromRow(data);
+}
+
+export async function getDetectedBills(): Promise<DetectedBill[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    if (fallbackDetectedBills.size === 0) {
+      const bills = detectBillsFromCandidates(
+        await getRecurringPaymentCandidates(),
+        await getTransactionEnrichments(),
+      );
+      bills.forEach((bill) => fallbackDetectedBills.set(bill.id, bill));
+    }
+
+    return Array.from(fallbackDetectedBills.values());
+  }
+
+  const { data, error } = await context.supabase
+    .from("detected_bills")
+    .select("*")
+    .order("next_due_date");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(detectedBillFromRow);
+}
+
+export async function upsertDetectedBill(bill: DetectedBill): Promise<DetectedBill> {
+  const context = await getAuthenticatedContext();
+  const updated = { ...bill, updatedAt: new Date().toISOString() };
+
+  if (!context) {
+    fallbackDetectedBills.set(updated.id, updated);
+    return updated;
+  }
+
+  const { data, error } = await context.supabase
+    .from("detected_bills")
+    .upsert(detectedBillToRow(updated, context.userId))
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return detectedBillFromRow(data);
+}
+
+export async function getDetectedSubscriptions(): Promise<DetectedSubscription[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    if (fallbackDetectedSubscriptions.size === 0) {
+      const subscriptions = detectSubscriptionsFromCandidates(
+        await getRecurringPaymentCandidates(),
+        mockTransactionRecords,
+        await getTransactionEnrichments(),
+      );
+      subscriptions.forEach((subscription) =>
+        fallbackDetectedSubscriptions.set(subscription.id, subscription),
+      );
+    }
+
+    return Array.from(fallbackDetectedSubscriptions.values());
+  }
+
+  const { data, error } = await context.supabase
+    .from("detected_subscriptions")
+    .select("*")
+    .order("next_expected_date");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(detectedSubscriptionFromRow);
+}
+
+export async function upsertDetectedSubscription(
+  subscription: DetectedSubscription,
+): Promise<DetectedSubscription> {
+  const context = await getAuthenticatedContext();
+  const updated = { ...subscription, updatedAt: new Date().toISOString() };
+
+  if (!context) {
+    fallbackDetectedSubscriptions.set(updated.id, updated);
+    return updated;
+  }
+
+  const { data, error } = await context.supabase
+    .from("detected_subscriptions")
+    .upsert(detectedSubscriptionToRow(updated, context.userId))
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return detectedSubscriptionFromRow(data);
+}
+
+export async function getSpendingAnomalies(): Promise<SpendingAnomaly[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return detectSpendingAnomalies({
+      userId: "user_mock_001",
+      transactions: mockTransactionRecords,
+      enrichments: await getTransactionEnrichments(),
+      detectedBills: await getDetectedBills(),
+      detectedSubscriptions: await getDetectedSubscriptions(),
+    });
+  }
+
+  const { data, error } = await context.supabase
+    .from("spending_anomalies")
+    .select("*")
+    .order("detected_at", { ascending: false });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(spendingAnomalyFromRow);
+}
+
+export async function getCashflowEvents(): Promise<CashflowEvent[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return buildCashflowEvents({
+      userId: "user_mock_001",
+      bills: [...mockBills, ...(await getDetectedBills()).filter((bill) => bill.status !== "dismissed")],
+      subscriptions: [
+        ...mockSubscriptions,
+        ...(await getDetectedSubscriptions()).filter(
+          (subscription) => subscription.status !== "dismissed",
+        ),
+      ],
+      manualFinanceItems: mockManualFinanceItems,
+      incomeCandidates: (await getRecurringPaymentCandidates()).filter(
+        (candidate) => candidate.candidateType === "income",
+      ),
+      startDate: "2026-06-30",
+      endDate: "2026-07-25",
+    });
+  }
+
+  const { data, error } = await context.supabase
+    .from("cashflow_events")
+    .select("*")
+    .order("date");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(cashflowEventFromRow);
 }

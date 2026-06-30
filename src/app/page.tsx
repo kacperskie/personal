@@ -1,11 +1,14 @@
 import {
   Banknote,
   CalendarClock,
+  ClipboardList,
   Landmark,
   PiggyBank,
+  Repeat,
   TrendingDown,
   TrendingUp,
   WalletCards,
+  ShieldCheck,
 } from "lucide-react";
 import { BudgetHealthChart } from "@/components/budget-health-chart";
 import { PageHeader } from "@/components/page-header";
@@ -17,8 +20,57 @@ import {
   upcomingBills,
 } from "@/lib/mock-data";
 import { formatCurrency } from "@/lib/format";
+import {
+  getAccounts,
+  getCashflowEvents,
+  getDetectedBills,
+  getDetectedSubscriptions,
+  getSpendingAnomalies,
+  getSubscriptions,
+  getTransactionEnrichments,
+} from "@/lib/repositories/finance-repository";
+import { forecastCashflow } from "@/lib/transaction-intelligence";
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const [
+    accounts,
+    cashflowEvents,
+    detectedBills,
+    detectedSubscriptions,
+    subscriptions,
+    anomalies,
+    enrichments,
+  ] = await Promise.all([
+    getAccounts(),
+    getCashflowEvents(),
+    getDetectedBills(),
+    getDetectedSubscriptions(),
+    getSubscriptions(),
+    getSpendingAnomalies(),
+    getTransactionEnrichments(),
+  ]);
+  const cashflowForecast = forecastCashflow({
+    accounts,
+    events: cashflowEvents,
+    minimumBuffer: 350,
+  });
+  const subscriptionTotalThisMonth = [
+    ...subscriptions.map((subscription) => subscription.amount),
+    ...detectedSubscriptions
+      .filter((subscription) => subscription.status !== "dismissed")
+      .map((subscription) => subscription.amountEstimate),
+  ].reduce((total, amount) => total + amount, 0);
+  const detectedItemsNeedingReview = [
+    ...detectedBills.filter((bill) => !bill.reviewed),
+    ...detectedSubscriptions.filter((subscription) => !subscription.reviewed),
+  ].length;
+  const unusualSpendingWarnings = anomalies.filter(
+    (anomaly) => anomaly.status !== "dismissed",
+  ).length;
+  const internalTransfersExcluded = enrichments.filter(
+    (enrichment) => enrichment.internalTransfer && enrichment.excludedFromSpending,
+  ).length;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -78,6 +130,41 @@ export default function DashboardPage() {
           value={formatCurrency(dashboardSummary.projectedMonthEndBalance)}
           detail="Forecast from known mock commitments"
           icon={Landmark}
+          tone="moss"
+        />
+        <StatCard
+          label="Subscription total this month"
+          value={formatCurrency(subscriptionTotalThisMonth)}
+          detail="Confirmed and detected recurring subscriptions"
+          icon={Repeat}
+          tone="teal"
+        />
+        <StatCard
+          label="Detected items needing review"
+          value={String(detectedItemsNeedingReview)}
+          detail="Bills and subscriptions awaiting approval"
+          icon={ClipboardList}
+          tone="saffron"
+        />
+        <StatCard
+          label="Projected bills account balance"
+          value={formatCurrency(cashflowForecast.projectedBillsAccountBalance)}
+          detail="After known bills and subscriptions before payday"
+          icon={WalletCards}
+          tone={cashflowForecast.projectedBillsAccountBalance < 0 ? "berry" : "moss"}
+        />
+        <StatCard
+          label="Unusual spending warnings"
+          value={String(unusualSpendingWarnings)}
+          detail="Duplicate, missing bill, large, or price-change checks"
+          icon={TrendingDown}
+          tone={unusualSpendingWarnings > 0 ? "saffron" : "moss"}
+        />
+        <StatCard
+          label="Internal transfers excluded"
+          value={String(internalTransfersExcluded)}
+          detail="Still visible in Transactions, excluded from spend totals"
+          icon={ShieldCheck}
           tone="moss"
         />
       </section>

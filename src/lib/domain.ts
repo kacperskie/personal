@@ -254,6 +254,35 @@ export type SyncJob = {
 
 export type CategoryKind = "income" | "expense" | "transfer";
 
+export type FinanceCategory =
+  | "income"
+  | "rent_or_mortgage"
+  | "council_tax"
+  | "utilities"
+  | "groceries"
+  | "eating_out"
+  | "transport"
+  | "subscriptions"
+  | "entertainment"
+  | "shopping"
+  | "pets"
+  | "health"
+  | "insurance"
+  | "savings"
+  | "debt_repayment"
+  | "transfers"
+  | "cash_withdrawal"
+  | "fees"
+  | "other";
+
+export type TransactionReviewStatus =
+  | "needs_review"
+  | "reviewed"
+  | "approved"
+  | "dismissed";
+
+export type EnrichmentSource = "rule" | "deterministic" | "provider" | "user";
+
 export type Category = {
   id: string;
   userId: string;
@@ -291,6 +320,144 @@ export type Transaction = {
   flags: string[];
   pending?: boolean;
   notes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MerchantRule = {
+  id: string;
+  userId: string;
+  matchPattern: string;
+  normalisedMerchantName: string;
+  merchantGroup: string | null;
+  category: FinanceCategory;
+  subcategory: string | null;
+  priority: number;
+  status: EntityStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TransactionEnrichment = {
+  id: string;
+  userId: string;
+  transactionId: string;
+  normalisedMerchantName: string;
+  merchantGroup: string | null;
+  category: FinanceCategory;
+  subcategory: string | null;
+  confidenceScore: number;
+  enrichmentSource: EnrichmentSource;
+  userReviewed: boolean;
+  excludedFromSpending: boolean;
+  internalTransfer: boolean;
+  billCandidate: boolean;
+  subscriptionCandidate: boolean;
+  recurringCandidate: boolean;
+  reviewStatus: TransactionReviewStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RecurringPaymentCandidateType =
+  | "bill"
+  | "subscription"
+  | "income"
+  | "transfer"
+  | "unknown";
+
+export type RecurringPaymentCandidate = {
+  id: string;
+  userId: string;
+  merchant: string;
+  amountEstimate: number;
+  frequency: RecurrenceFrequency;
+  nextExpectedDate: string;
+  confidence: number;
+  linkedAccountId: string;
+  latestTransactionDate: string;
+  transactionIds: string[];
+  candidateType: RecurringPaymentCandidateType;
+  status: TransactionReviewStatus;
+  reviewed: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DetectedBill = {
+  id: string;
+  userId: string;
+  name: string;
+  merchant: string;
+  amountEstimate: number;
+  frequency: RecurrenceFrequency;
+  nextDueDate: string;
+  paymentAccountId: string | null;
+  category: FinanceCategory;
+  confidence: number;
+  source: "recurring_detection" | "manual_review" | "rule";
+  status: TransactionReviewStatus | "confirmed" | "inactive";
+  reviewed: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DetectedSubscription = {
+  id: string;
+  userId: string;
+  name: string;
+  merchant: string;
+  amountEstimate: number;
+  frequency: RecurrenceFrequency;
+  nextExpectedDate: string;
+  paymentAccountId: string | null;
+  category: FinanceCategory;
+  confidence: number;
+  status: TransactionReviewStatus | "confirmed" | "inactive";
+  reviewed: boolean;
+  priceChangeDetected: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SpendingAnomalyType =
+  | "merchant_spend_high"
+  | "category_spend_high"
+  | "duplicate_transaction"
+  | "subscription_price_increase"
+  | "missing_expected_bill"
+  | "large_transaction"
+  | "budget_pace_high";
+
+export type SpendingAnomaly = {
+  id: string;
+  userId: string;
+  type: SpendingAnomalyType;
+  title: string;
+  description: string;
+  severity: "info" | "warning" | "urgent";
+  transactionIds: string[];
+  merchant: string | null;
+  category: FinanceCategory | null;
+  amount: number | null;
+  expectedAmount: number | null;
+  detectedAt: string;
+  status: TransactionReviewStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CashflowEvent = {
+  id: string;
+  userId: string;
+  date: string;
+  name: string;
+  amount: number;
+  currency: CurrencyCode;
+  direction: "inflow" | "outflow";
+  source: "bill" | "subscription" | "manual" | "income";
+  accountId: string | null;
+  includeInCashflow: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -440,6 +607,13 @@ export type NotificationType =
   | "transaction_updated"
   | "large_transaction"
   | "potential_duplicate_payment"
+  | "new_bill_detected"
+  | "new_subscription_detected"
+  | "subscription_price_changed"
+  | "missing_expected_bill"
+  | "unusual_spending"
+  | "projected_bills_account_shortfall"
+  | "transaction_needs_review"
   | "payday_planning"
   | "manual_item_review"
   | "safe_to_spend_change";

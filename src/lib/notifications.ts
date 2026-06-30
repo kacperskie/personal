@@ -25,6 +25,13 @@ export const notificationTypes: NotificationType[] = [
   "transaction_updated",
   "large_transaction",
   "potential_duplicate_payment",
+  "new_bill_detected",
+  "new_subscription_detected",
+  "subscription_price_changed",
+  "missing_expected_bill",
+  "unusual_spending",
+  "projected_bills_account_shortfall",
+  "transaction_needs_review",
   "payday_planning",
   "manual_item_review",
   "safe_to_spend_change",
@@ -90,6 +97,34 @@ const privacyCopy: Record<NotificationType, { title: string; body: string }> = {
   potential_duplicate_payment: {
     title: "Potential duplicate payment",
     body: "Similar account activity may need review.",
+  },
+  new_bill_detected: {
+    title: "New bill detected",
+    body: "A recurring commitment may need review.",
+  },
+  new_subscription_detected: {
+    title: "New subscription detected",
+    body: "A recurring payment may need review.",
+  },
+  subscription_price_changed: {
+    title: "Subscription price changed",
+    body: "A recurring payment changed and may need review.",
+  },
+  missing_expected_bill: {
+    title: "Expected bill missing",
+    body: "An expected commitment has not appeared yet.",
+  },
+  unusual_spending: {
+    title: "Unusual spending",
+    body: "Spending activity may need review.",
+  },
+  projected_bills_account_shortfall: {
+    title: "Bills account needs attention",
+    body: "Projected commitments may need review.",
+  },
+  transaction_needs_review: {
+    title: "Transaction needs review",
+    body: "A transaction needs categorisation review.",
   },
   payday_planning: {
     title: "Payday planning",

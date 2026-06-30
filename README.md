@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 8A adds event-driven Moneyhub transaction sync foundations while keeping provider-specific code isolated, server-side, and mock-compatible.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 8B adds deterministic transaction enrichment, recurring payment detection, bills and subscription detection, cashflow forecasting, anomalies, and review workflows while keeping the app mock-compatible and privacy-first.
 
 ## Current Phase
 
-Phase 8A: event-driven transaction sync foundation.
+Phase 8B: transaction enrichment and recurring finance intelligence.
 
 Implemented locally:
 
@@ -28,6 +28,11 @@ Implemented locally:
 - Transaction reconciliation for pending-to-posted, provider updates, soft deletion, restoration, and reviewed user override preservation.
 - Privacy-safe transaction notifications for new activity, updates, large transactions, and potential duplicate payments.
 - Transaction explorer that reads synced or mock transactions with account, institution, month, category, and spending/income/transfer filters.
+- Deterministic transaction enrichment helpers for merchant normalisation, category assignment, transfer detection, recurring payment detection, bills detection, subscription detection, cashflow forecasting, and anomaly detection.
+- Review workflows for approving detected bills/subscriptions, dismissing recurring candidates, editing merchant/category, marking transfers, excluding transactions from spending, and marking subscriptions inactive.
+- Bills & Subscriptions page with confirmed bills, confirmed subscriptions, detected items needing review, estimates, confidence, price-change warnings, and payment-account context.
+- Dashboard intelligence cards for subscription total, review queue count, projected bills account balance, unusual spending warnings, and internal transfers excluded from spending.
+- Supabase migration and repository functions for merchant rules, transaction enrichments, recurring payment candidates, detected bills, detected subscriptions, spending anomalies, and cashflow events.
 - Account-purpose default suggestions for American Express, Nationwide, and Revolut account patterns.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
@@ -88,6 +93,7 @@ supabase/migrations/20260701000000_phase4_secure_foundation.sql
 supabase/migrations/20260702000000_phase5_notifications_pwa.sql
 supabase/migrations/20260703000000_phase7_moneyhub_sync.sql
 supabase/migrations/20260704000000_phase8a_event_driven_sync.sql
+supabase/migrations/20260705000000_phase8b_transaction_intelligence.sql
 ```
 
 When Supabase variables are missing, the app intentionally falls back to mock/local data so local UI and calculation work can continue without a database.
@@ -214,6 +220,40 @@ Target real-world institutions remain:
 
 These are target institutions for the first real sandbox test once provider access is available. The UI does not claim guaranteed provider support.
 
+## Transaction Intelligence
+
+Phase 8B is deterministic-first. AI categorisation is not integrated yet.
+
+Enrichment is implemented in `src/lib/transaction-intelligence.ts` and repository persistence is exposed through `src/lib/repositories/finance-repository.ts`.
+
+The enrichment flow:
+
+- Normalises noisy merchant descriptions, such as `AMZNMktplace*UK`, `APPLE.COM/BILL`, `PAYPAL *SPOTIFY`, `TESCO STORES`, `SAINSBURYS S/MKTS`, `REVOLUT TRANSFER`, and `AMEX PAYMENT`.
+- Applies user-editable merchant rules before fallback category rules.
+- Assigns deterministic categories including income, rent or mortgage, council tax, utilities, groceries, eating out, transport, subscriptions, entertainment, shopping, pets, health, insurance, savings, debt repayment, transfers, cash withdrawal, fees, and other.
+- Detects likely own-account transfers from matching opposite amounts, transfer keywords, account context, Revolut/Nationwide transfer patterns, and American Express credit-card repayment patterns.
+- Excludes detected transfers from spending totals by default while keeping them visible and reviewable in Transactions.
+- Detects monthly, weekly, and annual recurring payment candidates by merchant, account, direction, date cadence, amount tolerance, and occurrence count.
+- Splits recurring candidates into bill-like items and subscription-like items using deterministic category and merchant signals.
+- Detects subscription price changes, duplicate-looking transactions, missing expected bills, unusually large transactions, and other first-pass review warnings.
+- Builds cashflow events from bills, subscriptions, manual finance items, and income candidates while respecting account purpose and cashflow inclusion flags.
+- Forecasts upcoming bills before payday, expected income, projected account balances, projected safe-to-spend, and projected bills account balance.
+
+Review workflow support:
+
+- Approve detected bills.
+- Approve detected subscriptions.
+- Dismiss recurring candidates.
+- Edit transaction merchant and category.
+- Mark a transaction as transfer or not transfer.
+- Exclude a transaction from spending.
+- Mark a subscription inactive.
+- Preserve reviewed decisions through repository functions and mock fallback.
+
+Phase 8B notifications are in-app only and privacy-safe outside the authenticated app. New notification types include new bill detected, new subscription detected, subscription price changed, missing expected bill, unusual spending, projected bills account shortfall, and transaction needs review.
+
+Future AI enrichment should use the deterministic output as context and suggest explanations or category changes only. AI should not silently recategorise, change budgets, create rules, or alter reviewed decisions without explicit user confirmation.
+
 ## RLS Expectations
 
 All user-owned tables include `user_id` and have Row Level Security enabled. Policies only allow authenticated users to select, insert, update, or delete rows where `auth.uid() = user_id`.
@@ -240,6 +280,13 @@ The migration covers:
 - provider_webhook_events
 - sync_jobs
 - provider_tokens
+- merchant_rules
+- transaction_enrichments
+- recurring_payment_candidates
+- detected_bills
+- detected_subscriptions
+- spending_anomalies
+- cashflow_events
 - audit_log
 - notification_preferences
 - notification_rules
@@ -310,6 +357,7 @@ Notification generation is deterministic in `src/lib/notifications.ts`:
 - Large transaction and potential duplicate payment alerts when transaction activity warrants review.
 - Manual review when a manual item review date is due.
 - Safe-to-spend change when the value changes materially.
+- New detected bills, subscriptions, subscription price changes, missing expected bills, unusual spending, projected bills-account shortfalls, and transactions needing review.
 
 Repository functions live in `src/lib/repositories/notification-repository.ts` and use Supabase when configured, with mock/local fallback otherwise.
 
@@ -348,7 +396,7 @@ The adapter interface supports:
 - `refreshConnection()`
 - `revokeConnection()`
 
-Phase 8A keeps `mockOpenBankingProvider` available, uses the Moneyhub sandbox adapter behind the provider abstraction, and adds webhook-driven transaction sync with scheduled/manual fallback. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
+Phase 8B keeps `mockOpenBankingProvider` available, uses the Moneyhub sandbox adapter behind the provider abstraction, and builds transaction intelligence on top of synced or mock transaction data. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
 
 ## Open Banking Token Boundary
 
@@ -441,6 +489,13 @@ Core domain types:
 - `NotificationRule`
 - `AppNotification`
 - `PushSubscriptionRecord`
+- `MerchantRule`
+- `TransactionEnrichment`
+- `RecurringPaymentCandidate`
+- `DetectedBill`
+- `DetectedSubscription`
+- `SpendingAnomaly`
+- `CashflowEvent`
 - `ManualFinanceItem`
 
 Account purposes:

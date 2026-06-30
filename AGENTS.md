@@ -20,6 +20,7 @@ Use mock/local data first, then direct account connection through Open Banking a
 
 ## Build principles
 - Keep financial calculations deterministic in code.
+- Keep transaction enrichment deterministic-first: merchant normalisation, categorisation, transfer detection, recurring detection, cashflow forecasts, and anomalies must be explainable and testable before AI suggestions are added.
 - Use AI for explanation, summarisation, categorisation suggestions, and scenario narration.
 - Never hard-code real financial data.
 - Never store bank login credentials.
@@ -67,6 +68,12 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Transaction reconciliation must upsert by stable provider transaction ID, preserve user-reviewed category/merchant/notes/transfer flags, mark provider-deleted transactions inactive, and restore them when the provider reports restored.
 - Provider payload inspection is sandbox-only, server-only, opt-in, redacted, and written only to gitignored local debug output.
 - Never commit real provider payloads; mapper tests must use synthetic fixtures only.
+- Phase 8B transaction intelligence must work from synced or mock transactions without adding CSV import or OpenAI.
+- Merchant rules, transaction enrichments, recurring candidates, detected bills, detected subscriptions, anomalies, and cashflow events must go through repository functions with Supabase and mock fallback support.
+- Detected transfers should be excluded from spending by default, remain visible in Transactions, and stay reviewable by the user.
+- Recurring bills and subscriptions are candidates until reviewed or approved; do not silently convert review candidates into user decisions.
+- Preserve user-reviewed merchant, category, notes, transfer, and spending-exclusion decisions during repeat provider sync and enrichment runs.
+- Do not log unnecessary transaction detail while enriching, detecting anomalies, or generating review workflows.
 - Production token storage should use encrypted storage or provider-managed token vaulting where available.
 - Provider API routes must require authentication, write audit events, return provider-safe errors, and never expose tokens.
 - Do not add production Open Banking API calls, real provider credentials, real token persistence, or token logging without a security review.
@@ -79,6 +86,7 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Do not request browser notification permission automatically; only request it after the user taps an Enable Notifications control.
 - Keep notification copy shown outside the app privacy-safe by default. Avoid amounts, bank names, account names, and detailed financial facts in browser notification text.
 - Transaction notification copy shown outside the app must stay generic, such as "New transaction detected", "Transaction updated", "Potential duplicate payment", or "Account connection needs attention".
+- Phase 8B intelligence notification copy shown outside the app must stay generic, such as "Bill detected", "Subscription detected", "Subscription price changed", "Expected payment needs review", "Unusual spending detected", or "Transaction needs review".
 - Detailed notification content may appear only inside the authenticated app.
 - Treat push subscription records as sensitive and avoid exposing endpoint internals in UI or logs.
 
