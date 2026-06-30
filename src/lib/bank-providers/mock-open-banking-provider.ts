@@ -7,6 +7,9 @@ import type {
 import type {
   CreateConnectionInput,
   OpenBankingProviderAdapter,
+  ProviderCallbackInput,
+  ProviderCallbackResult,
+  ProviderConnectionStart,
   TransactionQuery,
 } from "@/lib/bank-providers/types";
 
@@ -250,8 +253,9 @@ function connectionForId(connectionId: string): BankConnection {
 }
 
 export class MockOpenBankingProvider implements OpenBankingProviderAdapter {
-  async createConnection(input: CreateConnectionInput): Promise<BankConnection> {
-    return {
+  async createConnection(input: CreateConnectionInput): Promise<ProviderConnectionStart> {
+    const state = `conn_mock_${input.institutionId}_${Date.now()}`;
+    const connection: BankConnection = {
       id: `conn_${input.institutionId}_new`,
       provider: "mock",
       institutionName: input.institutionName,
@@ -264,6 +268,36 @@ export class MockOpenBankingProvider implements OpenBankingProviderAdapter {
       errorMessage: null,
       createdAt: now,
       updatedAt: now,
+    };
+
+    return {
+      connection,
+      authorizationUrl: null,
+      providerConfigured: true,
+      state,
+      safeMessage: "Mock provider connection created without external API calls.",
+    };
+  }
+
+  async handleCallback(input: ProviderCallbackInput): Promise<ProviderCallbackResult> {
+    const connectionId = input.state?.startsWith("conn_") ? input.state : "conn_mock_callback";
+
+    return {
+      connection: {
+        id: connectionId,
+        provider: "mock",
+        institutionName: "Mock sandbox",
+        institutionId: "mock",
+        status: "connected",
+        consentStatus: "active",
+        consentStartedAt: now,
+        consentExpiresAt: "2026-09-30T09:00:00.000Z",
+        lastSyncedAt: null,
+        errorMessage: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      safeMessage: "Mock callback handled.",
     };
   }
 

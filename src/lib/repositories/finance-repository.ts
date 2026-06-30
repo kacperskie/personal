@@ -4,6 +4,7 @@ import type {
   Bill,
   Budget,
   ManualFinanceItem,
+  ProviderSyncEvent,
   SavingsGoal,
   Transaction,
 } from "@/lib/domain";
@@ -29,6 +30,7 @@ import {
   transactionFromRow,
 } from "@/lib/repositories/mappers";
 import { createAuditEvent } from "@/lib/repositories/audit";
+import type { AuditEventInput } from "@/lib/repositories/audit";
 import {
   createAccountUpdatePayload,
   validateManualFinanceItemInput,
@@ -64,6 +66,21 @@ async function writeAudit(
     ...event,
     user_id: userId,
   });
+}
+
+export async function recordAuditEvent(input: AuditEventInput) {
+  const context = await getAuthenticatedContext();
+  const event = createAuditEvent({
+    ...input,
+    userId: context?.userId ?? input.userId,
+  });
+
+  if (!context) {
+    return event;
+  }
+
+  await writeAudit(context.userId, event, context.supabase);
+  return event;
 }
 
 export async function getAccounts(): Promise<Account[]> {
@@ -384,6 +401,166 @@ export async function upsertBankConnection(
   );
 
   return bankConnectionFromRow(data);
+}
+
+export async function getBankConnectionById(id: string): Promise<BankConnection | null> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return mockBankConnections.find((connection) => connection.id === id) ?? null;
+  }
+
+  const { data, error } = await context.supabase
+    .from("bank_connections")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data ? bankConnectionFromRow(data) : null;
+}
+
+export async function updateBankConnectionStatus(
+  connection: BankConnection,
+  eventType: "bank_connection_status_changed" | "bank_connection_sync_failed" | "bank_connection_revoked" = "bank_connection_status_changed",
+): Promise<BankConnection> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return connection;
+  }
+
+  const { data, error } = await context.supabase
+    .from("bank_connections")
+    .update(bankConnectionToRow(connection, context.userId))
+    .eq("id", connection.id)
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await writeAudit(
+    context.userId,
+    createAuditEvent({
+      userId: context.userId,
+      eventType,
+      entity: "bank_connections",
+      entityId: connection.id,
+      metadata: {
+        status: connection.status,
+        consentStatus: connection.consentStatus,
+      },
+    }),
+    context.supabase,
+  );
+
+  return bankConnectionFromRow(data);
+}
+
+export async function recordProviderSyncEvent(
+  event: ProviderSyncEvent,
+): Promise<ProviderSyncEvent> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return event;
+  }
+
+  const { data, error } = await context.supabase
+    .from("provider_sync_events")
+    .insert({
+      id: event.id,
+      user_id: context.userId,
+      provider_connection_id: event.providerConnectionId,
+      provider: event.provider,
+      status: event.status,
+      message: event.message,
+      started_at: event.startedAt,
+      finished_at: event.finishedAt,
+      created_at: event.startedAt,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await writeAudit(
+    context.userId,
+    createAuditEvent({
+      userId: context.userId,
+      eventType: "provider_sync_event_created",
+      entity: "provider_sync_events",
+      entityId: event.id,
+      metadata: {
+        providerConnectionId: event.providerConnectionId,
+        status: event.status,
+      },
+    }),
+    context.supabase,
+  );
+
+  return {
+    id: data.id,
+    providerConnectionId: data.provider_connection_id,
+    provider: data.provider,
+    status: data.status,
+    message: data.message,
+    startedAt: data.started_at,
+    finishedAt: data.finished_at,
+  };
+}
+
+export async function upsertTransaction(transaction: Transaction): Promise<Transaction> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return transaction;
+  }
+
+  await context.supabase.from("categories").upsert({
+    id: transaction.categoryId,
+    user_id: context.userId,
+    name: transaction.categoryId === "cat_uncategorised" ? "Uncategorised" : transaction.categoryId,
+    parent_id: null,
+    kind: transaction.kind,
+    budget_type: "transfer",
+    include_in_budget: transaction.kind === "expense",
+    status: "active",
+  });
+
+  const { data, error } = await context.supabase
+    .from("transactions")
+    .upsert({
+      id: transaction.id,
+      user_id: context.userId,
+      account_id: transaction.accountId,
+      category_id: transaction.categoryId,
+      date: transaction.date,
+      merchant: transaction.merchant,
+      description: transaction.description,
+      amount: transaction.amount,
+      currency: transaction.currency,
+      kind: transaction.kind,
+      status: transaction.status,
+      flags: transaction.flags,
+      created_at: transaction.createdAt,
+      updated_at: transaction.updatedAt,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return transactionFromRow(data);
 }
 
 export async function getTransactions(): Promise<Transaction[]> {

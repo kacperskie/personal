@@ -18,6 +18,9 @@ export const notificationTypes: NotificationType[] = [
   "subscription_change",
   "consent_renewal",
   "account_sync_failure",
+  "connection_successful",
+  "sync_successful",
+  "connection_revoked",
   "payday_planning",
   "manual_item_review",
   "safe_to_spend_change",
@@ -55,6 +58,18 @@ const privacyCopy: Record<NotificationType, { title: string; body: string }> = {
   account_sync_failure: {
     title: "Account connection needs attention",
     body: "A connection did not sync successfully.",
+  },
+  connection_successful: {
+    title: "Account connection ready",
+    body: "A connection was completed successfully.",
+  },
+  sync_successful: {
+    title: "Account sync complete",
+    body: "A connection synced successfully.",
+  },
+  connection_revoked: {
+    title: "Account connection disconnected",
+    body: "A connection was disconnected.",
   },
   payday_planning: {
     title: "Payday planning",

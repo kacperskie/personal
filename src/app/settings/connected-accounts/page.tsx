@@ -1,9 +1,10 @@
-import { Cable, CheckCircle2, CircleAlert, CircleDashed } from "lucide-react";
+import { CheckCircle2, CircleAlert, CircleDashed } from "lucide-react";
+import { ConnectedAccountsManager } from "@/components/connected-accounts/connected-accounts-manager";
 import { PageHeader } from "@/components/page-header";
 import { StatusPill } from "@/components/status-pill";
 import type { ConnectionLifecycleStatus } from "@/lib/domain";
-import { formatDateShort } from "@/lib/format";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
+import { getProviderConfiguredState } from "@/lib/bank-providers/provider-config";
 import { getBankConnections } from "@/lib/repositories/finance-repository";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +56,7 @@ export default async function ConnectedAccountsPage() {
       <PageHeader
         eyebrow="Open Banking foundation"
         title="Connected Accounts"
-        description="Mock provider connections for American Express, Nationwide, and Revolut. Real API calls and token storage are not enabled."
+        description="Moneyhub sandbox-ready foundation with provider-agnostic routes, mock fallback, and server-only token handling."
       />
 
       <section className="grid gap-4 xl:grid-cols-3">
@@ -78,69 +79,10 @@ export default async function ConnectedAccountsPage() {
         </div>
       </section>
 
-      <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
-        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-ink">Provider connections</h2>
-            <p className="text-sm text-ink/60">Sandbox placeholders use the mock adapter only.</p>
-          </div>
-          <Cable className="h-5 w-5 text-teal" aria-hidden="true" />
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          {connectionsWithDisplayStatus.length === 0 ? (
-            <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/60">
-              No provider connections are available yet. Real connection setup remains disabled.
-            </div>
-          ) : null}
-
-          {connectionsWithDisplayStatus.map((connection) => (
-            <article key={connection.id} className="rounded-lg border border-line bg-paper p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="font-semibold text-ink">{connection.institutionName}</h3>
-                  <p className="mt-1 text-sm text-ink/60">
-                    Provider: {connection.provider} - Institution ID: {connection.institutionId}
-                  </p>
-                </div>
-                <StatusPill
-                  label={labelStatus(connection.displayStatus)}
-                  tone={statusTone[connection.displayStatus]}
-                />
-              </div>
-              <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <dt className="text-ink/50">Consent</dt>
-                  <dd className="mt-1 font-semibold text-ink">
-                    {labelStatus(connection.consentStatus)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-ink/50">Last synced</dt>
-                  <dd className="mt-1 font-semibold text-ink">
-                    {connection.lastSyncedAt
-                      ? formatDateShort(connection.lastSyncedAt.slice(0, 10))
-                      : "Never"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-ink/50">Consent expires</dt>
-                  <dd className="mt-1 font-semibold text-ink">
-                    {connection.consentExpiresAt
-                      ? formatDateShort(connection.consentExpiresAt.slice(0, 10))
-                      : "Not set"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-ink/50">Error</dt>
-                  <dd className="mt-1 font-semibold text-ink">
-                    {connection.errorMessage ?? "None"}
-                  </dd>
-                </div>
-              </dl>
-            </article>
-          ))}
-        </div>
-      </section>
+      <ConnectedAccountsManager
+        connections={bankConnections}
+        providerState={getProviderConfiguredState()}
+      />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
         <h2 className="text-lg font-semibold text-ink">Connection lifecycle states</h2>

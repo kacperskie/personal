@@ -369,6 +369,9 @@ export type NotificationType =
   | "subscription_change"
   | "consent_renewal"
   | "account_sync_failure"
+  | "connection_successful"
+  | "sync_successful"
+  | "connection_revoked"
   | "payday_planning"
   | "manual_item_review"
   | "safe_to_spend_change";

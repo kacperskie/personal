@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 5 adds a mobile-friendly iPhone PWA shell, install guidance, service worker foundation, notification models, notification preferences, and an in-app notification centre.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 6 adds the first real Open Banking sandbox integration foundation while keeping provider-specific code isolated, server-side, and mock-compatible.
 
 ## Current Phase
 
-Phase 5: mobile PWA and notification foundation.
+Phase 6: Open Banking sandbox foundation.
 
 Implemented locally:
 
@@ -16,6 +16,9 @@ Implemented locally:
 - Notifications page with unread count, severity filtering, mark-read, mark-all-read, dismiss, and action links.
 - iPhone PWA metadata, `manifest.webmanifest`, app icon placeholders, Apple touch icon placeholder, and service worker registration.
 - Offline fallback page and service worker handlers for fetch, push placeholders, and notification clicks.
+- Moneyhub provider implementation skeleton in `src/lib/bank-providers/moneyhub-provider.ts`.
+- Provider config, safe errors, payload mappers, provider notifications, and sync workflow helpers under `src/lib/bank-providers`.
+- OAuth/consent route handlers for start, callback, sync, and revoke.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
 - Protected app routes when Supabase is configured.
@@ -27,7 +30,8 @@ Implemented locally:
 - Editable Manual Entries page for create, update, delete, inclusion flags, status, and review dates.
 - Server-only provider token boundary stub. Real tokens are not stored in this phase.
 - Notification repository functions, deterministic notification generation helpers, privacy-safe copy helpers, and audit events.
-- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, token-store boundaries, PWA files, install guidance, and notification rules.
+- Server-only token placeholder store with expiry metadata and client-safe payload helpers.
+- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, token-store boundaries, PWA files, install guidance, notification rules, provider mappers, provider safe errors, unauthenticated routes, and sync workflow.
 
 ## Product Direction
 
@@ -73,6 +77,54 @@ supabase/migrations/20260702000000_phase5_notifications_pwa.sql
 ```
 
 When Supabase variables are missing, the app intentionally falls back to mock/local data so local UI and calculation work can continue without a database.
+
+## Moneyhub Sandbox Setup
+
+Moneyhub is the first provider implementation target. The current code is sandbox-ready but does not include real credentials and does not make production Open Banking calls.
+
+Required placeholders:
+
+```bash
+OPEN_BANKING_PROVIDER=moneyhub
+MONEYHUB_CLIENT_ID=
+MONEYHUB_CLIENT_SECRET=
+MONEYHUB_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
+MONEYHUB_WEBHOOK_SECRET=
+MONEYHUB_API_BASE_URL=https://api.moneyhub.co.uk/v2.0
+MONEYHUB_AUTH_BASE_URL=https://identity.moneyhub.co.uk
+```
+
+OAuth/consent flow:
+
+- `POST /api/bank-connections/start` creates a provider-agnostic connection record and returns a safe authorization URL when configured.
+- `GET /api/bank-connections/callback` handles the provider callback server-side and stores only token placeholder metadata.
+- `POST /api/bank-connections/[connectionId]/sync` runs the server-side sync workflow.
+- `POST /api/bank-connections/[connectionId]/revoke` disconnects the provider connection and revokes token placeholders.
+
+All provider routes require authentication, run server-side, return provider-safe errors, write audit events, and never expose provider tokens to the browser.
+
+## Sync Workflow
+
+The sync workflow:
+
+- Reads provider accounts through the selected adapter.
+- Maps provider account payloads into app account models.
+- Upserts accounts.
+- Reads recent provider transactions.
+- Maps provider transaction payloads into app transaction models.
+- Upserts transactions.
+- Records `provider_sync_events`.
+- Updates `bank_connections` status and `lastSyncedAt`.
+- Creates in-app notifications for connection success, sync success, sync failure, consent attention, and connection revocation.
+- Records failures with safe user-facing messages only.
+
+Target real-world institutions remain:
+
+- American Express
+- Nationwide
+- Revolut
+
+These are target institutions for the first real sandbox test once provider access is available. The UI does not claim guaranteed provider support.
 
 ## RLS Expectations
 
@@ -202,24 +254,30 @@ The adapter interface supports:
 - `refreshConnection()`
 - `revokeConnection()`
 
-Phase 5 still uses `mockOpenBankingProvider` only. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
+Phase 6 keeps `mockOpenBankingProvider` available and adds a Moneyhub sandbox-ready adapter. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
 
 ## Open Banking Token Boundary
 
 `src/lib/bank-providers/token-store.ts` is server-only and stubbed in this phase.
 
-Provider tokens must never be exposed to browser code. Future production token storage should use encrypted storage or provider-managed token vaulting where available. Real access tokens and refresh tokens must not be committed, logged, or stored by client-side code.
+Provider tokens must never be exposed to browser code. The current store saves only encrypted-token placeholder metadata, token references, scopes, expiry metadata, and revocation metadata. Future production token storage should use encrypted storage or provider-managed token vaulting where available. Real access tokens and refresh tokens must not be committed, logged, returned from API routes, or stored by client-side code.
 
 ## Sandbox Environment
 
 Open Banking sandbox placeholders:
 
 ```bash
-OPEN_BANKING_PROVIDER=mock
+OPEN_BANKING_PROVIDER=moneyhub
 OPEN_BANKING_CLIENT_ID=
 OPEN_BANKING_CLIENT_SECRET=
-OPEN_BANKING_REDIRECT_URI=http://localhost:3000/api/open-banking/callback
+OPEN_BANKING_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
 OPEN_BANKING_WEBHOOK_SECRET=
+MONEYHUB_CLIENT_ID=
+MONEYHUB_CLIENT_SECRET=
+MONEYHUB_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
+MONEYHUB_WEBHOOK_SECRET=
+MONEYHUB_API_BASE_URL=https://api.moneyhub.co.uk/v2.0
+MONEYHUB_AUTH_BASE_URL=https://identity.moneyhub.co.uk
 ```
 
 Do not commit real credentials, client secrets, access tokens, refresh tokens, consent artefacts, or real financial data.
@@ -326,6 +384,7 @@ personal-finance-hq/
 |- src/
 |  |- app/
 |  |- components/
+|  |- lib/bank-providers/
 |  `- lib/
 |- tests/
 |- AGENTS.md
@@ -335,7 +394,7 @@ personal-finance-hq/
 
 ## Data Boundary
 
-Seeded values are fake and live in `src/lib/mock-data.ts` or deterministic mock provider data in `src/lib/bank-providers/mock-open-banking-provider.ts`. Do not add real bank data, account credentials, Open Banking tokens, OpenAI secrets, Supabase credentials, or real personal financial records to the repository.
+Seeded values are fake and live in `src/lib/mock-data.ts` or deterministic mock provider data in `src/lib/bank-providers/mock-open-banking-provider.ts`. Moneyhub code is sandbox-ready only and must not include real credentials. Do not add real bank data, account credentials, Open Banking tokens, OpenAI secrets, Supabase credentials, or real personal financial records to the repository.
 
 ## Documentation
 

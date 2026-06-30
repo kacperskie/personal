@@ -50,10 +50,16 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 
 ## Supabase and Open Banking rules
 - Required local placeholders: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-- Open Banking placeholders stay mock-only until a provider sandbox is explicitly configured.
+- Open Banking uses Moneyhub as the first sandbox-ready provider skeleton while preserving the mock provider fallback.
+- Provider-specific code must stay behind `src/lib/bank-providers`.
+- Public app code should call provider-agnostic routes, services, or repository functions only.
+- Open Banking placeholders stay sandbox-only until a provider sandbox is explicitly configured.
 - Provider tokens must only be handled in server-only modules.
+- Token-store code may save encrypted-token placeholders, token references, scopes, expiry metadata, and revocation metadata only.
 - Production token storage should use encrypted storage or provider-managed token vaulting where available.
-- Do not add real Open Banking API calls, real provider credentials, or token persistence without a security review.
+- Provider API routes must require authentication, write audit events, return provider-safe errors, and never expose tokens.
+- Do not add production Open Banking API calls, real provider credentials, real token persistence, or token logging without a security review.
+- Keep target institution copy framed as roadmap/test targets, not guaranteed provider support: American Express, Nationwide, Revolut.
 
 ## Mobile, PWA, and notification rules
 - Keep the app installable with `manifest.webmanifest`, iOS web app metadata, Apple touch icon placeholders, and service worker registration.

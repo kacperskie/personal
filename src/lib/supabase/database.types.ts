@@ -367,6 +367,29 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["push_subscriptions"]["Row"]>;
         Relationships: [];
       };
+      provider_sync_events: {
+        Row: {
+          id: string;
+          user_id: string;
+          provider_connection_id: string;
+          provider: BankProvider;
+          status: ConnectionLifecycleStatus;
+          message: string;
+          started_at: string;
+          finished_at: string | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["provider_sync_events"]["Row"]> & {
+          user_id: string;
+          provider_connection_id: string;
+          provider: BankProvider;
+          status: ConnectionLifecycleStatus;
+          message: string;
+          started_at: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_sync_events"]["Row"]>;
+        Relationships: [];
+      };
       audit_log: {
         Row: {
           id: string;
