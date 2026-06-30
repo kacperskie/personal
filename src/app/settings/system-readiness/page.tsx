@@ -1,7 +1,9 @@
 import { Activity, AlertTriangle, CheckCircle2, CircleDashed } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { StatusPill } from "@/components/status-pill";
+import { FirebaseConfigDiagnostics } from "@/components/firebase/config-diagnostics";
 import { buildSystemReadinessReport } from "@/lib/deployment/readiness";
+import { getFirebasePublicConfigDiagnostics } from "@/lib/firebase/diagnostics";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +21,14 @@ const IconByStatus = {
 
 export default function SystemReadinessPage() {
   const report = buildSystemReadinessReport();
+  const firebaseDiagnostics = getFirebasePublicConfigDiagnostics();
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Staging readiness"
         title="System Readiness"
-        description="Safe deployment checks for Netlify, Vercel fallback, Supabase, Open Banking providers, OpenAI, PWA push, scheduled jobs, and redirect setup. Secret values are never shown."
+        description="Safe deployment checks for Netlify, Vercel fallback, Firebase, Firestore, TrueLayer sandbox, OpenAI, PWA push, scheduled jobs, and redirect setup. Secret values are never shown."
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
@@ -44,6 +47,9 @@ export default function SystemReadinessPage() {
             label={report.overallStatus}
             tone={toneByStatus[report.overallStatus]}
           />
+        </div>
+        <div className="mt-4">
+          <FirebaseConfigDiagnostics diagnostics={firebaseDiagnostics} />
         </div>
       </section>
 

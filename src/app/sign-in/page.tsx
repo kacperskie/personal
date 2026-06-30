@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
+import { FirebaseConfigDiagnostics } from "@/components/firebase/config-diagnostics";
 import { getBackendProvider } from "@/lib/backend/provider";
 import { isFirebaseConfigured } from "@/lib/firebase/env";
+import { getFirebasePublicConfigDiagnostics } from "@/lib/firebase/diagnostics";
 import { FirebaseSignInForm } from "./firebase-sign-in-form";
 
 export default function SignInPage() {
   const backendProvider = getBackendProvider();
   const firebaseConfigured = isFirebaseConfigured();
   const isFirebase = backendProvider === "firebase";
+  const diagnostics = getFirebasePublicConfigDiagnostics();
 
   return (
     <div className="mx-auto max-w-xl space-y-6 px-4 py-10">
@@ -20,6 +23,12 @@ export default function SignInPage() {
             : "Mock mode is active (BACKEND_PROVIDER=mock); no sign-in is required."
         }
       />
+      {isFirebase && !firebaseConfigured ? (
+        <FirebaseConfigDiagnostics
+          diagnostics={diagnostics}
+          title="Firebase sign-in is not fully configured"
+        />
+      ) : null}
       {isFirebase ? (
         <FirebaseSignInForm firebaseConfigured={firebaseConfigured} />
       ) : (
