@@ -154,7 +154,11 @@ describe("phase 6 Open Banking sandbox foundation", () => {
       connectionId: "conn_test",
       provider: "moneyhub",
       tokenReference: "token-ref:moneyhub:conn_test",
+      providerUserId: null,
+      providerConnectionId: null,
       expiresAt: "2026-09-30T09:00:00.000Z",
+      accessExpiresAt: "2026-09-30T09:00:00.000Z",
+      refreshExpiresAt: null,
       scopes: ["accounts", "transactions"],
       revokedAt: null,
       updatedAt: record.updatedAt,
@@ -189,6 +193,7 @@ describe("phase 6 Open Banking sandbox foundation", () => {
         providerAccountId: "provider_current_1",
         providerTransactionId: "provider_txn_1",
         date: "2026-06-30",
+        providerUpdatedAt: "2026-06-30T12:00:00.000Z",
         merchant: "Sandbox Grocers",
         description: "Groceries",
         amount: -12,
@@ -204,7 +209,15 @@ describe("phase 6 Open Banking sandbox foundation", () => {
       getConnectionStatus: vi.fn(),
       getAccounts: vi.fn(async () => providerAccounts),
       getTransactions: vi.fn(async () => providerTransactions),
-      refreshConnection: vi.fn(),
+      refreshConnection: vi.fn(async () => ({
+        id: "sync_refresh",
+        providerConnectionId: "conn_test",
+        provider: "mock" as const,
+        status: "syncing" as const,
+        message: "Refresh requested.",
+        startedAt: "2026-06-30T09:00:00.000Z",
+        finishedAt: null,
+      })),
       revokeConnection: vi.fn(),
     };
     const accounts: Account[] = [];
@@ -237,7 +250,7 @@ describe("phase 6 Open Banking sandbox foundation", () => {
     expect(result.transactionsUpserted).toBe(1);
     expect(accounts[0].providerAccountId).toBe("provider_current_1");
     expect(transactions[0].merchant).toBe("Sandbox Grocers");
-    expect(syncEvents.map((event) => event.status)).toEqual(["syncing", "connected"]);
+    expect(syncEvents.map((event) => event.status)).toEqual(["syncing", "syncing", "connected"]);
     expect(result.auditEvents.map((event) => event.eventType)).toContain(
       "bank_connection_sync_completed",
     );
@@ -256,7 +269,15 @@ describe("phase 6 Open Banking sandbox foundation", () => {
         );
       }),
       getTransactions: vi.fn(),
-      refreshConnection: vi.fn(),
+      refreshConnection: vi.fn(async () => ({
+        id: "sync_refresh",
+        providerConnectionId: "conn_test",
+        provider: "mock" as const,
+        status: "syncing" as const,
+        message: "Refresh requested.",
+        startedAt: "2026-06-30T09:00:00.000Z",
+        finishedAt: null,
+      })),
       revokeConnection: vi.fn(),
     };
     const syncEvents: ProviderSyncEvent[] = [];
@@ -278,7 +299,7 @@ describe("phase 6 Open Banking sandbox foundation", () => {
 
     expect(result.status).toBe("failed");
     expect(result.connection.status).toBe("sync_failed");
-    expect(syncEvents.map((event) => event.status)).toEqual(["syncing", "sync_failed"]);
+    expect(syncEvents.map((event) => event.status)).toEqual(["syncing", "syncing", "sync_failed"]);
     expect(result.auditEvents.map((event) => event.eventType)).toContain(
       "bank_connection_sync_failed",
     );

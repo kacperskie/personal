@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@mft/moneyhub-api-client": "^6.99.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.109.0",
     "lucide-react": "^0.468.0",

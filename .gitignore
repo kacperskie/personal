@@ -21,6 +21,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# local sandbox payload inspection output
+.debug/
+
 # local tools downloaded for verification
 .tools/
 

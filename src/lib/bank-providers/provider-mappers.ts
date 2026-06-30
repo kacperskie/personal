@@ -1,7 +1,5 @@
 import type {
   Account,
-  AccountPurpose,
-  AccountRole,
   AccountSubtype,
   AccountType,
   BankConnection,
@@ -11,6 +9,7 @@ import type {
   ProviderTransaction,
   Transaction,
 } from "@/lib/domain";
+import { suggestAccountPurpose } from "@/lib/bank-providers/account-purpose-suggestions";
 
 export type ProviderAccountPayload = {
   id?: string;
@@ -28,13 +27,18 @@ export type ProviderAccountPayload = {
   type?: string;
   subtype?: string;
   accountType?: string;
-  balance?: number | { amount?: number; value?: number };
+  balance?: number | { amount?: number | { value?: number; currency?: string }; value?: number };
   currentBalance?: number;
   availableBalance?: number;
   creditLimit?: number | null;
   currency?: string;
   mask?: string | null;
   number?: string | null;
+  dateModified?: string;
+  productName?: string;
+  details?: {
+    creditLimit?: number | null;
+  };
 };
 
 export type ProviderTransactionPayload = {
@@ -43,19 +47,45 @@ export type ProviderTransactionPayload = {
   accountId?: string;
   providerAccountId?: string;
   date?: string;
+  dateModified?: string;
   bookingDate?: string;
   description?: string;
   longDescription?: string;
   merchant?: string;
   counterpartyName?: string;
-  amount?: number | { amount?: number; value?: number };
+  amount?: number | { amount?: number | { value?: number; currency?: string }; value?: number; currency?: string };
   value?: number;
   currency?: string;
   status?: string;
   pending?: boolean;
   category?: string | { name?: string };
+  categoryId?: string;
+  categoryName?: string;
   isTransfer?: boolean;
   proprietaryBankTransactionCode?: string;
+  proprietaryTransactionCode?: {
+    code?: string;
+    issuer?: string;
+  };
+  transactionCode?: {
+    code?: string;
+    subCode?: string;
+  };
+  transactionInformation?: string;
+  shortDescription?: string;
+  creditorAccount?: {
+    name?: string;
+  };
+  debtorAccount?: {
+    name?: string;
+  };
+  cardInstrument?: {
+    name?: string;
+    cardSchemeName?: string;
+    authorisationType?: string;
+  };
+  deleted?: boolean;
+  restored?: boolean;
 };
 
 function numericValue(value: ProviderAccountPayload["balance"] | ProviderTransactionPayload["amount"]) {
@@ -63,17 +93,46 @@ function numericValue(value: ProviderAccountPayload["balance"] | ProviderTransac
     return value;
   }
 
-  return value?.amount ?? value?.value ?? 0;
+  if (typeof value?.amount === "number") {
+    return value.amount;
+  }
+
+  if (typeof value?.amount === "object") {
+    return value.amount.value ?? 0;
+  }
+
+  return value?.value ?? 0;
+}
+
+function currencyValue(
+  value: ProviderAccountPayload["balance"] | ProviderTransactionPayload["amount"],
+) {
+  if (!value || typeof value === "number") {
+    return null;
+  }
+
+  if (typeof value.amount === "object") {
+    return value.amount.currency ?? null;
+  }
+
+  return "currency" in value ? value.currency ?? null : null;
 }
 
 function mapAccountType(value?: string): AccountType {
   const normalized = value?.toLowerCase() ?? "";
 
-  if (normalized.includes("credit")) {
+  if (
+    normalized.includes("cash:current") ||
+    normalized.includes("current")
+  ) {
+    return "current_account";
+  }
+
+  if (normalized.includes("credit") || normalized === "card") {
     return "credit_card";
   }
 
-  if (normalized.includes("saving") || normalized.includes("saver")) {
+  if (normalized.includes("saving") || normalized.includes("saver") || normalized === "savings") {
     return "savings";
   }
 
@@ -89,7 +148,7 @@ function mapAccountType(value?: string): AccountType {
     return "investment";
   }
 
-  if (normalized.includes("loan")) {
+  if (normalized.includes("loan") || normalized.includes("mortgage")) {
     return "loan";
   }
 
@@ -134,54 +193,6 @@ function mapAccountSubtype(type: AccountType, value?: string): AccountSubtype {
   return "current";
 }
 
-function purposeForType(type: AccountType): AccountPurpose {
-  if (type === "credit_card") {
-    return "credit_card";
-  }
-
-  if (type === "savings") {
-    return "short_term_savings";
-  }
-
-  if (type === "isa" || type === "investment") {
-    return "investment";
-  }
-
-  if (type === "pension") {
-    return "pension";
-  }
-
-  if (type === "loan") {
-    return "loan_account";
-  }
-
-  return "main_current_account";
-}
-
-function roleForType(type: AccountType): AccountRole {
-  if (type === "credit_card") {
-    return "credit";
-  }
-
-  if (type === "savings") {
-    return "savings";
-  }
-
-  if (type === "isa" || type === "investment") {
-    return "investment";
-  }
-
-  if (type === "pension") {
-    return "pension";
-  }
-
-  if (type === "loan") {
-    return "loan";
-  }
-
-  return "spending";
-}
-
 function normalizeBalanceForAccountType(type: AccountType, balance: number) {
   if (type === "credit_card" && balance > 0) {
     return -balance;
@@ -190,12 +201,48 @@ function normalizeBalanceForAccountType(type: AccountType, balance: number) {
   return balance;
 }
 
+function normalizeProviderTransactionStatus(
+  payload: ProviderTransactionPayload,
+): NonNullable<ProviderTransaction["providerStatus"]> {
+  const normalized = payload.status?.toLowerCase() ?? "";
+
+  if (payload.deleted || normalized.includes("deleted") || normalized.includes("removed")) {
+    return "deleted";
+  }
+
+  if (payload.restored || normalized.includes("restored")) {
+    return "restored";
+  }
+
+  if (payload.pending || normalized.includes("pending")) {
+    return "pending";
+  }
+
+  if (normalized.includes("posted") || normalized.includes("booked") || normalized.includes("complete")) {
+    return "posted";
+  }
+
+  return "unknown";
+}
+
 export function mapProviderAccountPayload(
   payload: ProviderAccountPayload,
   connection: Pick<BankConnection, "id" | "institutionId" | "institutionName">,
 ): ProviderAccount {
-  const accountType = mapAccountType(payload.type ?? payload.accountType);
-  const accountSubtype = mapAccountSubtype(accountType, payload.subtype ?? payload.type);
+  const descriptor = [
+    payload.subtype,
+    payload.type,
+    payload.accountType,
+    payload.displayName,
+    payload.name,
+    payload.accountName,
+    payload.productName,
+    payload.officialName,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const accountType = mapAccountType(descriptor);
+  const accountSubtype = mapAccountSubtype(accountType, descriptor);
   const rawBalance = numericValue(payload.balance ?? payload.currentBalance ?? 0);
 
   return {
@@ -204,16 +251,25 @@ export function mapProviderAccountPayload(
       payload.providerAccountId ?? payload.accountId ?? payload.id ?? "provider_account_unknown",
     institutionName: payload.institution?.name ?? payload.providerName ?? connection.institutionName,
     institutionId: payload.institution?.id ?? connection.institutionId,
-    name: payload.displayName ?? payload.name ?? payload.accountName ?? "Provider account",
+    name:
+      payload.displayName ??
+      payload.name ??
+      payload.accountName ??
+      payload.productName ??
+      "Provider account",
     officialName:
-      payload.officialName ?? payload.name ?? payload.accountName ?? "Provider account",
+      payload.officialName ??
+      payload.name ??
+      payload.accountName ??
+      payload.productName ??
+      "Provider account",
     type: accountType,
     subtype: accountSubtype,
     balance: normalizeBalanceForAccountType(accountType, rawBalance),
     availableBalance:
       payload.availableBalance === undefined ? null : Number(payload.availableBalance),
-    creditLimit: payload.creditLimit ?? null,
-    currency: (payload.currency ?? "GBP") as CurrencyCode,
+    creditLimit: payload.creditLimit ?? payload.details?.creditLimit ?? null,
+    currency: (payload.currency ?? currencyValue(payload.balance) ?? "GBP") as CurrencyCode,
     mask: payload.mask ?? payload.number?.slice(-4) ?? null,
   };
 }
@@ -222,12 +278,27 @@ export function mapProviderTransactionPayload(
   payload: ProviderTransactionPayload,
   providerConnectionId: string,
 ): ProviderTransaction {
-  const description = payload.description ?? payload.longDescription ?? "Provider transaction";
+  const description =
+    payload.description ??
+    payload.longDescription ??
+    payload.transactionInformation ??
+    payload.shortDescription ??
+    "Provider transaction";
   const category =
-    typeof payload.category === "string" ? payload.category : payload.category?.name ?? null;
-  const transferHint = `${description} ${category ?? ""} ${payload.proprietaryBankTransactionCode ?? ""}`
-    .toLowerCase()
-    .includes("transfer");
+    typeof payload.category === "string"
+      ? payload.category
+      : payload.category?.name ?? payload.categoryName ?? payload.categoryId ?? null;
+  const providerStatus = normalizeProviderTransactionStatus(payload);
+  const transferText =
+    `${description} ${payload.merchant ?? ""} ${payload.counterpartyName ?? ""} ${category ?? ""} ${payload.proprietaryBankTransactionCode ?? ""} ${payload.proprietaryTransactionCode?.code ?? ""} ${payload.transactionCode?.code ?? ""} ${payload.transactionCode?.subCode ?? ""}`
+      .toLowerCase();
+  const transferHint =
+    transferText.includes("transfer") ||
+    transferText.includes("own account") ||
+    transferText.includes("internal") ||
+    transferText.includes("credit card repayment") ||
+    transferText.includes("card repayment") ||
+    transferText.includes("payment to credit card");
 
   return {
     id: `ptxn_${payload.id ?? payload.transactionId ?? crypto.randomUUID()}`,
@@ -235,11 +306,13 @@ export function mapProviderTransactionPayload(
     providerAccountId: payload.providerAccountId ?? payload.accountId ?? "provider_account_unknown",
     providerTransactionId: payload.transactionId ?? payload.id ?? "provider_transaction_unknown",
     date: (payload.date ?? payload.bookingDate ?? new Date().toISOString()).slice(0, 10),
-    merchant: payload.merchant ?? payload.counterpartyName ?? description,
+    providerUpdatedAt: payload.dateModified ?? null,
+    providerStatus,
+    merchant: payload.merchant ?? payload.counterpartyName ?? payload.shortDescription ?? description,
     description,
     amount: numericValue(payload.amount ?? payload.value ?? 0),
-    currency: (payload.currency ?? "GBP") as CurrencyCode,
-    pending: payload.pending ?? payload.status === "pending",
+    currency: (payload.currency ?? currencyValue(payload.amount) ?? "GBP") as CurrencyCode,
+    pending: providerStatus === "pending",
     category,
     isOwnAccountTransfer: payload.isTransfer ?? transferHint,
   };
@@ -251,8 +324,7 @@ export function providerAccountToAccount(
   provider: Account["provider"],
   now = new Date().toISOString(),
 ): Account {
-  const role = roleForType(account.type);
-  const purpose = purposeForType(account.type);
+  const suggestion = suggestAccountPurpose(account);
 
   return {
     id: `acct_${provider}_${account.providerAccountId}`.replaceAll(/[^a-zA-Z0-9_]/g, "_"),
@@ -270,19 +342,19 @@ export function providerAccountToAccount(
     availableBalance: account.availableBalance,
     creditLimit: account.creditLimit,
     mask: account.mask,
-    purpose,
-    accountRole: role,
-    includeInCashflow: account.type === "current_account" || account.type === "credit_card",
-    includeInNetWorth: true,
-    includeInSafeToSpend: account.type === "current_account",
-    isSpendingAccount: account.type === "current_account",
-    isBillsAccount: false,
-    isSavingsAccount: account.type === "savings" || account.type === "isa",
+    purpose: suggestion.purpose,
+    accountRole: suggestion.accountRole,
+    includeInCashflow: suggestion.includeInCashflow,
+    includeInNetWorth: suggestion.includeInNetWorth,
+    includeInSafeToSpend: suggestion.includeInSafeToSpend,
+    isSpendingAccount: suggestion.isSpendingAccount,
+    isBillsAccount: suggestion.isBillsAccount,
+    isSavingsAccount: suggestion.isSavingsAccount,
     linkedGoalIds: [],
     syncStatus: "connected",
     lastSyncedAt: now,
     consentExpiresAt: null,
-    notes: "Mapped from provider sandbox payload.",
+    notes: `Mapped from provider sandbox payload. ${suggestion.reason}`,
     provider,
     status: "active",
     createdAt: now,
@@ -304,19 +376,136 @@ export function providerTransactionToTransaction(
   categoryId = "cat_uncategorised",
   now = new Date().toISOString(),
 ): Transaction {
+  const stableTransactionId = `txn_${transaction.providerConnectionId}_${accountId}_${transaction.providerTransactionId}`.replaceAll(
+    /[^a-zA-Z0-9_]/g,
+    "_",
+  );
+
   return {
-    id: `txn_${transaction.providerTransactionId}`.replaceAll(/[^a-zA-Z0-9_]/g, "_"),
+    id: stableTransactionId,
     accountId,
     categoryId,
+    providerConnectionId: transaction.providerConnectionId,
+    providerTransactionId: transaction.providerTransactionId,
+    providerUpdatedAt: transaction.providerUpdatedAt,
+    providerStatus: transaction.providerStatus ?? (transaction.pending ? "pending" : "posted"),
+    providerDeletedAt: transaction.providerStatus === "deleted" ? now : null,
+    providerRestoredAt: transaction.providerStatus === "restored" ? now : null,
     date: transaction.date,
     merchant: transaction.merchant,
     description: transaction.description,
     amount: transaction.amount,
     currency: transaction.currency,
     kind: transactionKind(transaction.amount, transaction.isOwnAccountTransfer),
-    status: transaction.pending ? "suggested" : "needs_review",
-    flags: transaction.isOwnAccountTransfer ? ["own_account_transfer"] : [],
+    status: transaction.providerStatus === "deleted" ? "excluded" : transaction.pending ? "suggested" : "needs_review",
+    flags: [
+      ...(transaction.isOwnAccountTransfer ? ["own_account_transfer"] : []),
+      ...(transaction.providerStatus === "deleted" ? ["provider_deleted"] : []),
+    ],
+    pending: transaction.pending,
+    notes: null,
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+export function markProviderTransactionDeleted(
+  existing: Transaction,
+  now = new Date().toISOString(),
+): Transaction {
+  return {
+    ...existing,
+    providerStatus: "deleted",
+    providerDeletedAt: now,
+    providerRestoredAt: existing.providerRestoredAt ?? null,
+    status: "excluded",
+    flags: Array.from(
+      new Set([
+        ...existing.flags,
+        "provider_deleted",
+        ...(existing.status === "reviewed" ? ["provider_deleted_from_reviewed"] : []),
+      ]),
+    ),
+    pending: false,
+    updatedAt: now,
+  };
+}
+
+export function markProviderTransactionRestored(
+  existing: Transaction,
+  incoming?: Transaction,
+  now = new Date().toISOString(),
+): Transaction {
+  const restored = mergeSyncedTransaction(existing, {
+    ...(incoming ?? existing),
+    providerStatus: incoming?.providerStatus ?? "restored",
+    providerDeletedAt: null,
+    providerRestoredAt: now,
+    flags: (incoming?.flags ?? existing.flags).filter(
+      (flag) => flag !== "provider_deleted" && flag !== "provider_deleted_from_reviewed",
+    ),
+    status:
+      existing.status === "reviewed" || existing.flags.includes("provider_deleted_from_reviewed")
+        ? "reviewed"
+        : incoming?.status ?? "needs_review",
+    pending: false,
+    updatedAt: now,
+  });
+
+  return {
+    ...restored,
+    providerStatus: "restored",
+    providerDeletedAt: null,
+    providerRestoredAt: now,
+    flags: restored.flags.filter(
+      (flag) => flag !== "provider_deleted" && flag !== "provider_deleted_from_reviewed",
+    ),
+    pending: false,
+    updatedAt: now,
+  };
+}
+
+export function mergeSyncedTransaction(
+  existing: Transaction | null | undefined,
+  incoming: Transaction,
+): Transaction {
+  if (!existing) {
+    return incoming;
+  }
+
+  if (incoming.providerStatus === "deleted") {
+    return markProviderTransactionDeleted(existing, incoming.updatedAt);
+  }
+
+  const hadReviewedOverride =
+    existing.status === "reviewed" || existing.flags.includes("provider_deleted_from_reviewed");
+  const preserveUserCategory =
+    hadReviewedOverride &&
+    existing.categoryId !== "cat_uncategorised" &&
+    existing.categoryId !== incoming.categoryId;
+  const preserveReviewedFields = hadReviewedOverride;
+  const flags = Array.from(
+    new Set([
+      ...incoming.flags,
+      ...existing.flags.filter((flag) => flag !== "provider_deleted" || incoming.providerStatus !== "restored"),
+    ]),
+  ).filter((flag) => !(incoming.providerStatus === "restored" && flag === "provider_deleted"));
+
+  return {
+    ...incoming,
+    categoryId: preserveUserCategory ? existing.categoryId : incoming.categoryId,
+    merchant: preserveReviewedFields ? existing.merchant : incoming.merchant,
+    notes: preserveReviewedFields ? existing.notes ?? null : incoming.notes ?? null,
+    status: hadReviewedOverride ? "reviewed" : incoming.status,
+    flags,
+    providerDeletedAt:
+      incoming.providerStatus === "restored" ? null : incoming.providerDeletedAt ?? existing.providerDeletedAt ?? null,
+    providerRestoredAt:
+      incoming.providerStatus === "restored"
+        ? incoming.providerRestoredAt ?? incoming.updatedAt
+        : incoming.providerRestoredAt ?? existing.providerRestoredAt ?? null,
+    pending: incoming.providerStatus === "posted" || incoming.providerStatus === "restored" ? false : incoming.pending,
+    createdAt: existing.createdAt,
+    updatedAt: incoming.updatedAt,
   };
 }

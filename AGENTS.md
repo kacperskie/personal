@@ -50,12 +50,23 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 
 ## Supabase and Open Banking rules
 - Required local placeholders: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-- Open Banking uses Moneyhub as the first sandbox-ready provider skeleton while preserving the mock provider fallback.
+- Open Banking uses Moneyhub as the first sandbox proof-of-concept provider while preserving the mock provider fallback.
 - Provider-specific code must stay behind `src/lib/bank-providers`.
 - Public app code should call provider-agnostic routes, services, or repository functions only.
 - Open Banking placeholders stay sandbox-only until a provider sandbox is explicitly configured.
+- Moneyhub sandbox setup uses `OPEN_BANKING_PROVIDER=moneyhub`, Moneyhub client credentials, redirect URI, webhook secret, sandbox base URLs, and optional JWKS/private-key references.
+- OAuth callback state and nonce must be verified server-side before saving connection metadata.
 - Provider tokens must only be handled in server-only modules.
 - Token-store code may save encrypted-token placeholders, token references, scopes, expiry metadata, and revocation metadata only.
+- Provider sync must upsert by stable provider transaction identity and preserve reviewed user category choices on repeat sync.
+- Moneyhub webhooks are placeholder-only until signature verification and payload handling are reviewed for production.
+- Phase 8A webhook sync is sandbox-only and handles Moneyhub transaction/sync events through `src/lib/bank-providers` and server-side routes only.
+- Moneyhub webhook handling must remain idempotent by `provider + provider_event_id`; duplicate webhooks must not duplicate transactions, notifications, sync jobs, or audit events.
+- Use the lightweight sync queue for event-driven and scheduled sync fallback before adding any paid queue provider.
+- Scheduled sync must require `CRON_SECRET`, skip disconnected/revoked/expired/re-consent connections, and avoid excessive provider polling.
+- Transaction reconciliation must upsert by stable provider transaction ID, preserve user-reviewed category/merchant/notes/transfer flags, mark provider-deleted transactions inactive, and restore them when the provider reports restored.
+- Provider payload inspection is sandbox-only, server-only, opt-in, redacted, and written only to gitignored local debug output.
+- Never commit real provider payloads; mapper tests must use synthetic fixtures only.
 - Production token storage should use encrypted storage or provider-managed token vaulting where available.
 - Provider API routes must require authentication, write audit events, return provider-safe errors, and never expose tokens.
 - Do not add production Open Banking API calls, real provider credentials, real token persistence, or token logging without a security review.
@@ -67,6 +78,7 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Do not add real push notification delivery until explicit permission, secure subscription storage, endpoint redaction, VAPID/provider setup, and security review are in place.
 - Do not request browser notification permission automatically; only request it after the user taps an Enable Notifications control.
 - Keep notification copy shown outside the app privacy-safe by default. Avoid amounts, bank names, account names, and detailed financial facts in browser notification text.
+- Transaction notification copy shown outside the app must stay generic, such as "New transaction detected", "Transaction updated", "Potential duplicate payment", or "Account connection needs attention".
 - Detailed notification content may appear only inside the authenticated app.
 - Treat push subscription records as sensitive and avoid exposing endpoint internals in UI or logs.
 

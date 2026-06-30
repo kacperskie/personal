@@ -3,6 +3,7 @@ import { createProviderNotification } from "@/lib/bank-providers/provider-notifi
 import { createSafeErrorPayload, ProviderSafeError } from "@/lib/bank-providers/provider-errors";
 import { getProviderAdapter } from "@/lib/bank-providers/provider-service";
 import { syncBankConnection } from "@/lib/bank-providers/sync-workflow";
+import { getProviderToken } from "@/lib/bank-providers/token-store";
 import {
   getBankConnectionById,
   recordAuditEvent,
@@ -41,10 +42,19 @@ export async function POST(
     });
   }
 
+  const tokenRecord =
+    connection.provider === "moneyhub"
+      ? await getProviderToken(auth.user.id, connection.id)
+      : null;
   const result = await syncBankConnection({
     userId: auth.user.id,
     connection,
     provider: getProviderAdapter(connection.provider),
+    providerContext: {
+      providerUserId: tokenRecord?.providerUserId,
+      providerConnectionId: tokenRecord?.providerConnectionId,
+      tokenReference: tokenRecord?.tokenReference,
+    },
     dependencies: {
       upsertAccount,
       upsertTransaction,

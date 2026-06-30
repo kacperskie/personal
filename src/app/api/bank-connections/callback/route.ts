@@ -48,12 +48,33 @@ export async function GET(request: Request) {
       }),
     );
 
-    return NextResponse.redirect(new URL("/settings/connected-accounts", url.origin));
+    return NextResponse.redirect(
+      new URL("/settings/connected-accounts?connection=connected", url.origin),
+    );
   } catch (error) {
     const safeError = toProviderSafeError(error, "provider_callback_failed");
 
-    return NextResponse.json(createSafeErrorPayload(safeError, "provider_callback_failed"), {
-      status: safeError.status,
+    await recordAuditEvent({
+      userId: auth.user.id,
+      eventType: "bank_connection_callback_failed",
+      entity: "bank_connections",
+      entityId: url.searchParams.get("state") ?? "unknown",
+      metadata: {
+        provider: providerName,
+        code: safeError.code,
+      },
     });
+
+    const redirectUrl = new URL("/settings/connected-accounts", url.origin);
+    redirectUrl.searchParams.set("connection", "callback_failed");
+    redirectUrl.searchParams.set("reason", safeError.code);
+
+    if (request.headers.get("accept")?.includes("application/json")) {
+      return NextResponse.json(createSafeErrorPayload(safeError, "provider_callback_failed"), {
+        status: safeError.status,
+      });
+    }
+
+    return NextResponse.redirect(redirectUrl);
   }
 }

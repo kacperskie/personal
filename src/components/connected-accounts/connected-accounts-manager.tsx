@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { Cable, RefreshCw, ShieldAlert, Unplug } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import type { BankConnection, BankProvider, ConnectionLifecycleStatus } from "@/lib/domain";
+import type { MoneyhubSandboxReadiness } from "@/lib/bank-providers/provider-config";
 import { formatDateShort } from "@/lib/format";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
 
@@ -37,12 +38,15 @@ export function ConnectedAccountsManager({
     provider: BankProvider;
     configured: boolean;
     safeMessage: string;
+    moneyhubReadiness?: MoneyhubSandboxReadiness;
   };
 }) {
   const [selectedProvider, setSelectedProvider] = useState<BankProvider>(
     providerState.provider === "mock" ? "moneyhub" : providerState.provider,
   );
   const [message, setMessage] = useState<string | null>(providerState.safeMessage);
+  const [syncingConnectionIds, setSyncingConnectionIds] = useState<string[]>([]);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [isPending, startTransition] = useTransition();
   const asOfDate = new Date().toISOString().slice(0, 10);
   const connectionsWithDisplayStatus = useMemo(
@@ -95,10 +99,27 @@ export function ConnectedAccountsManager({
 
   function syncConnection(connectionId: string) {
     setMessage(null);
+    setSyncingConnectionIds((current) => Array.from(new Set([...current, connectionId])));
     startTransition(() => {
       void postJson(`/api/bank-connections/${connectionId}/sync`)
         .then((payload) => setMessage(payload.message ?? "Sync completed."))
-        .catch((error: Error) => setMessage(error.message));
+        .catch((error: Error) => setMessage(error.message))
+        .finally(() =>
+          setSyncingConnectionIds((current) =>
+            current.filter((candidate) => candidate !== connectionId),
+          ),
+        );
+    });
+  }
+
+  function syncAllConnections() {
+    setMessage(null);
+    setIsSyncingAll(true);
+    startTransition(() => {
+      void postJson("/api/bank-connections/sync-all")
+        .then((payload) => setMessage(payload.message ?? "Active connections refreshed."))
+        .catch((error: Error) => setMessage(error.message))
+        .finally(() => setIsSyncingAll(false));
     });
   }
 
@@ -113,6 +134,71 @@ export function ConnectedAccountsManager({
 
   return (
     <div className="space-y-6">
+      {providerState.moneyhubReadiness ? (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-ink">Moneyhub sandbox readiness</h2>
+              <p className="mt-2 text-sm leading-6 text-ink/70">
+                {providerState.moneyhubReadiness.safeMessage}
+              </p>
+            </div>
+            <StatusPill
+              label={
+                providerState.moneyhubReadiness.configured
+                  ? "configured"
+                  : "not configured"
+              }
+              tone={providerState.moneyhubReadiness.configured ? "good" : "warning"}
+            />
+          </div>
+          <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Provider selected</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.moneyhubReadiness.providerSelected ? "Moneyhub" : "Mock/other"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Sandbox mode</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.moneyhubReadiness.sandboxModeEnabled ? "Enabled" : "Not enabled"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Supabase</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.moneyhubReadiness.supabaseConfigured ? "Configured" : "Mock fallback"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Token store</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.moneyhubReadiness.tokenStoreAvailable
+                  ? "Server-only stub"
+                  : "Unavailable"}
+              </dd>
+            </div>
+          </dl>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
+            <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/70">
+              <p className="font-semibold text-ink">Expected redirect URI</p>
+              <p className="mt-1 break-all">
+                {providerState.moneyhubReadiness.redirectUri ?? "Not configured"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/70">
+              <p className="font-semibold text-ink">Missing environment variables</p>
+              <p className="mt-1">
+                {providerState.moneyhubReadiness.missingEnvironment.length > 0
+                  ? providerState.moneyhubReadiness.missingEnvironment.join(", ")
+                  : "None required for sandbox client initialisation are missing."}
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,auto)] lg:items-start">
           <div>
@@ -172,11 +258,44 @@ export function ConnectedAccountsManager({
       </section>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
-        <div className="mb-5">
-          <h2 className="text-lg font-semibold text-ink">Provider connections</h2>
-          <p className="text-sm text-ink/60">
-            Status, consent, manual sync, and disconnect controls use provider-agnostic routes.
-          </p>
+        <h2 className="text-lg font-semibold text-ink">After first sync</h2>
+        <p className="mt-2 text-sm leading-6 text-ink/70">
+          Review account purposes on the Accounts page so safe-to-spend, cashflow, net worth,
+          and savings-goal links use the right accounts.
+        </p>
+        <div className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <p className="font-semibold text-ink">American Express</p>
+            <p className="mt-1 text-ink/60">Suggested as credit card, excluded from safe-to-spend.</p>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <p className="font-semibold text-ink">Nationwide</p>
+            <p className="mt-1 text-ink/60">Current, bills, savings, and credit-card roles need review.</p>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <p className="font-semibold text-ink">Revolut</p>
+            <p className="mt-1 text-ink/60">Everyday accounts and vault-like balances are suggested separately.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+        <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Provider connections</h2>
+            <p className="text-sm text-ink/60">
+              Status, consent, manual sync, and disconnect controls use provider-agnostic routes.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={syncAllConnections}
+            disabled={isPending || isSyncingAll || connectionsWithDisplayStatus.length === 0}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+          >
+            <RefreshCw className={isSyncingAll ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+            Sync all active
+          </button>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           {connectionsWithDisplayStatus.length === 0 ? (
@@ -187,6 +306,11 @@ export function ConnectedAccountsManager({
 
           {connectionsWithDisplayStatus.map((connection) => (
             <article key={connection.id} className="rounded-lg border border-line bg-paper p-4">
+              {(() => {
+                const isSyncingConnection = syncingConnectionIds.includes(connection.id);
+
+                return (
+                  <>
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h3 className="font-semibold text-ink">{connection.institutionName}</h3>
@@ -195,8 +319,8 @@ export function ConnectedAccountsManager({
                   </p>
                 </div>
                 <StatusPill
-                  label={labelStatus(connection.displayStatus)}
-                  tone={statusTone[connection.displayStatus]}
+                  label={isSyncingConnection ? "syncing" : labelStatus(connection.displayStatus)}
+                  tone={isSyncingConnection ? "neutral" : statusTone[connection.displayStatus]}
                 />
               </div>
               <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
@@ -207,7 +331,7 @@ export function ConnectedAccountsManager({
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-ink/50">Last synced</dt>
+                  <dt className="text-ink/50">Last successful sync</dt>
                   <dd className="mt-1 font-semibold text-ink">
                     {connection.lastSyncedAt
                       ? formatDateShort(connection.lastSyncedAt.slice(0, 10))
@@ -223,6 +347,14 @@ export function ConnectedAccountsManager({
                   </dd>
                 </div>
                 <div>
+                  <dt className="text-ink/50">Last failed sync</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {connection.status === "sync_failed"
+                      ? formatDateShort(connection.updatedAt.slice(0, 10))
+                      : "No failed sync"}
+                  </dd>
+                </div>
+                <div>
                   <dt className="text-ink/50">Last sync result</dt>
                   <dd className="mt-1 font-semibold text-ink">
                     {connection.errorMessage ?? "No provider-safe error"}
@@ -233,11 +365,11 @@ export function ConnectedAccountsManager({
                 <button
                   type="button"
                   onClick={() => syncConnection(connection.id)}
-                  disabled={isPending || connection.status === "disconnected"}
+                  disabled={isPending || isSyncingConnection || connection.status === "disconnected"}
                   className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
-                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                  Sync
+                  <RefreshCw className={isSyncingConnection ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                  {isSyncingConnection ? "Syncing" : "Sync"}
                 </button>
                 <button
                   type="button"
@@ -249,6 +381,9 @@ export function ConnectedAccountsManager({
                   Disconnect
                 </button>
               </div>
+                  </>
+                );
+              })()}
             </article>
           ))}
         </div>

@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
-import { revokeProviderToken } from "@/lib/bank-providers/token-store";
+import { getProviderToken, revokeProviderToken } from "@/lib/bank-providers/token-store";
 import { createProviderNotification } from "@/lib/bank-providers/provider-notifications";
-import { createSafeErrorPayload, ProviderSafeError, toProviderSafeError } from "@/lib/bank-providers/provider-errors";
+import {
+  createSafeErrorPayload,
+  ProviderSafeError,
+  toProviderSafeError,
+} from "@/lib/bank-providers/provider-errors";
 import { getProviderAdapter } from "@/lib/bank-providers/provider-service";
 import {
   getBankConnectionById,
@@ -40,7 +44,15 @@ export async function POST(
 
   try {
     const provider = getProviderAdapter(connection.provider);
-    const revoked = await provider.revokeConnection(connection.id);
+    const tokenRecord =
+      connection.provider === "moneyhub"
+        ? await getProviderToken(auth.user.id, connection.id)
+        : null;
+    const revoked = await provider.revokeConnection(connection.id, {
+      providerUserId: tokenRecord?.providerUserId,
+      providerConnectionId: tokenRecord?.providerConnectionId,
+      tokenReference: tokenRecord?.tokenReference,
+    });
     await revokeProviderToken(auth.user.id, connection.id);
     const saved = await updateBankConnectionStatus(
       {

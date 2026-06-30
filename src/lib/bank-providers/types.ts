@@ -35,17 +35,28 @@ export type ProviderCallbackResult = {
 export type TransactionQuery = {
   dateFrom?: string;
   dateTo?: string;
+  providerAccountId?: string;
+  providerUserId?: string | null;
+  providerConnectionId?: string | null;
+  tokenReference?: string | null;
+};
+
+export type ProviderRequestContext = {
+  providerUserId?: string | null;
+  providerConnectionId?: string | null;
+  tokenReference?: string | null;
+  providerAccountIds?: string[];
 };
 
 export interface OpenBankingProviderAdapter {
   createConnection(input: CreateConnectionInput): Promise<ProviderConnectionStart>;
   handleCallback(input: ProviderCallbackInput): Promise<ProviderCallbackResult>;
   getConnectionStatus(connectionId: string): Promise<BankConnection>;
-  getAccounts(connectionId: string): Promise<ProviderAccount[]>;
+  getAccounts(connectionId: string, context?: ProviderRequestContext): Promise<ProviderAccount[]>;
   getTransactions(
     connectionId: string,
     query?: TransactionQuery,
   ): Promise<ProviderTransaction[]>;
-  refreshConnection(connectionId: string): Promise<ProviderSyncEvent>;
-  revokeConnection(connectionId: string): Promise<BankConnection>;
+  refreshConnection(connectionId: string, context?: ProviderRequestContext): Promise<ProviderSyncEvent>;
+  revokeConnection(connectionId: string, context?: ProviderRequestContext): Promise<BankConnection>;
 }

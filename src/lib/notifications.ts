@@ -21,6 +21,10 @@ export const notificationTypes: NotificationType[] = [
   "connection_successful",
   "sync_successful",
   "connection_revoked",
+  "new_transaction",
+  "transaction_updated",
+  "large_transaction",
+  "potential_duplicate_payment",
   "payday_planning",
   "manual_item_review",
   "safe_to_spend_change",
@@ -70,6 +74,22 @@ const privacyCopy: Record<NotificationType, { title: string; body: string }> = {
   connection_revoked: {
     title: "Account connection disconnected",
     body: "A connection was disconnected.",
+  },
+  new_transaction: {
+    title: "New transaction detected",
+    body: "New account activity is ready to review.",
+  },
+  transaction_updated: {
+    title: "Transaction updated",
+    body: "Account activity changed and may need review.",
+  },
+  large_transaction: {
+    title: "Large transaction detected",
+    body: "Account activity may need attention.",
+  },
+  potential_duplicate_payment: {
+    title: "Potential duplicate payment",
+    body: "Similar account activity may need review.",
   },
   payday_planning: {
     title: "Payday planning",

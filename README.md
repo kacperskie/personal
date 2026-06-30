@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 6 adds the first real Open Banking sandbox integration foundation while keeping provider-specific code isolated, server-side, and mock-compatible.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 8A adds event-driven Moneyhub transaction sync foundations while keeping provider-specific code isolated, server-side, and mock-compatible.
 
 ## Current Phase
 
-Phase 6: Open Banking sandbox foundation.
+Phase 8A: event-driven transaction sync foundation.
 
 Implemented locally:
 
@@ -16,22 +16,34 @@ Implemented locally:
 - Notifications page with unread count, severity filtering, mark-read, mark-all-read, dismiss, and action links.
 - iPhone PWA metadata, `manifest.webmanifest`, app icon placeholders, Apple touch icon placeholder, and service worker registration.
 - Offline fallback page and service worker handlers for fetch, push placeholders, and notification clicks.
-- Moneyhub provider implementation skeleton in `src/lib/bank-providers/moneyhub-provider.ts`.
+- Moneyhub provider implementation in `src/lib/bank-providers/moneyhub-provider.ts` using the official Moneyhub API client behind the provider adapter.
 - Provider config, safe errors, payload mappers, provider notifications, and sync workflow helpers under `src/lib/bank-providers`.
 - OAuth/consent route handlers for start, callback, sync, and revoke.
+- Moneyhub sandbox readiness checker and Settings / Connected Accounts readiness card.
+- Event-driven Moneyhub webhook handling at `POST /api/bank-connections/webhook/moneyhub` for transaction and sync events.
+- Idempotent provider webhook event tracking with duplicate webhook no-op handling.
+- Lightweight sync queue abstraction with Supabase persistence when configured and in-memory mock fallback otherwise.
+- Scheduled fallback sync route at `POST /api/bank-connections/scheduled-sync`, protected by `CRON_SECRET`.
+- Manual refresh-all endpoint at `POST /api/bank-connections/sync-all`.
+- Transaction reconciliation for pending-to-posted, provider updates, soft deletion, restoration, and reviewed user override preservation.
+- Privacy-safe transaction notifications for new activity, updates, large transactions, and potential duplicate payments.
+- Transaction explorer that reads synced or mock transactions with account, institution, month, category, and spending/income/transfer filters.
+- Account-purpose default suggestions for American Express, Nationwide, and Revolut account patterns.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
 - Protected app routes when Supabase is configured.
 - Basic user profile creation on sign-in.
 - SQL migration for finance tables, provider sync state, audit log, provider token placeholders, and RLS policies.
 - SQL migration for notification preferences, notification rules, app notifications, and sensitive push subscription placeholders.
+- SQL migration for provider transaction update metadata and repeat-sync dedupe index.
+- SQL migration for provider webhook events, sync jobs, and provider transaction status fields.
 - Repository layer that reads from Supabase when configured and falls back to mock/local data otherwise.
 - Editable Accounts page for account purpose, inclusion flags, and linked savings goals.
 - Editable Manual Entries page for create, update, delete, inclusion flags, status, and review dates.
 - Server-only provider token boundary stub. Real tokens are not stored in this phase.
 - Notification repository functions, deterministic notification generation helpers, privacy-safe copy helpers, and audit events.
 - Server-only token placeholder store with expiry metadata and client-safe payload helpers.
-- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, token-store boundaries, PWA files, install guidance, notification rules, provider mappers, provider safe errors, unauthenticated routes, and sync workflow.
+- Unit tests for finance calculations, repository fallback, validation, migration coverage, audit helpers, token-store boundaries, PWA files, install guidance, notification rules, provider mappers, provider safe errors, unauthenticated routes, Moneyhub readiness and callback handling, webhook parsing/idempotency, synced transaction UI, duplicate handling, reconciliation, sync queue, scheduled sync protection, manual refresh-all, and sync workflow.
 
 ## Product Direction
 
@@ -74,6 +86,8 @@ Or run the SQL in:
 ```text
 supabase/migrations/20260701000000_phase4_secure_foundation.sql
 supabase/migrations/20260702000000_phase5_notifications_pwa.sql
+supabase/migrations/20260703000000_phase7_moneyhub_sync.sql
+supabase/migrations/20260704000000_phase8a_event_driven_sync.sql
 ```
 
 When Supabase variables are missing, the app intentionally falls back to mock/local data so local UI and calculation work can continue without a database.
@@ -92,16 +106,60 @@ MONEYHUB_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
 MONEYHUB_WEBHOOK_SECRET=
 MONEYHUB_API_BASE_URL=https://api.moneyhub.co.uk/v2.0
 MONEYHUB_AUTH_BASE_URL=https://identity.moneyhub.co.uk
+MONEYHUB_JWKS_URL=
+MONEYHUB_PRIVATE_KEY=
+MONEYHUB_KEY_ID=
+OPEN_BANKING_PROVIDER_PAYLOAD_DEBUG=false
+PROVIDER_PAYLOAD_DEBUG_DIR=.debug/provider-payloads
+CRON_SECRET=
 ```
+
+Moneyhub sandbox setup requires a Moneyhub sandbox/API client, a registered redirect URL matching `MONEYHUB_REDIRECT_URI`, any required signing key material or key reference for the client configuration, webhook configuration in the provider admin portal, and Supabase configured for persistent sync testing.
 
 OAuth/consent flow:
 
-- `POST /api/bank-connections/start` creates a provider-agnostic connection record and returns a safe authorization URL when configured.
-- `GET /api/bank-connections/callback` handles the provider callback server-side and stores only token placeholder metadata.
-- `POST /api/bank-connections/[connectionId]/sync` runs the server-side sync workflow.
+- `POST /api/bank-connections/start` creates a provider-agnostic connection record, attempts Moneyhub sandbox user registration, stores temporary state/nonce metadata server-side, and returns a safe authorization URL when configured.
+- `GET /api/bank-connections/callback` verifies state, handles the provider callback server-side, stores only token placeholder metadata, creates audit/notification events, and redirects back to Settings / Connected Accounts.
+- `POST /api/bank-connections/[connectionId]/sync` retrieves server-side token metadata, calls the provider sync method where available, maps provider accounts and transactions, and upserts canonical records.
+- `POST /api/bank-connections/sync-all` manually refreshes all active visible connections for the signed-in user.
+- `POST /api/bank-connections/scheduled-sync` runs server-side scheduled fallback syncs for active, non-expired connections when the caller supplies `CRON_SECRET`.
 - `POST /api/bank-connections/[connectionId]/revoke` disconnects the provider connection and revokes token placeholders.
+- `POST /api/bank-connections/webhook/moneyhub` validates a webhook signature or local stub signature, parses transaction/sync events, records idempotent provider webhook events, enqueues a connection or account sync, processes the sync server-side, records provider sync/audit events, and creates one privacy-safe notification for first-seen events.
 
 All provider routes require authentication, run server-side, return provider-safe errors, write audit events, and never expose provider tokens to the browser.
+
+Troubleshooting:
+
+- Provider not configured: check `OPEN_BANKING_PROVIDER=moneyhub`, Moneyhub client credentials, base URLs, and redirect URI.
+- Callback failed: check the redirect URL in Moneyhub matches `/api/bank-connections/callback`, the local user is still signed in, and state has not expired.
+- Sync failed: reconnect if token metadata is missing, consent expired, or the provider reports a sandbox error.
+- Consent expired: use the connected accounts page to start a fresh sandbox consent flow.
+- Production Open Banking and financial data handling require provider terms review, privacy/security review, and any necessary regulatory/compliance assessment before broader use.
+
+## Provider Payload Inspection
+
+Sandbox provider payload inspection is opt-in and server-only. It is intended for mapper hardening before advanced enrichment work.
+
+To capture redacted Moneyhub sandbox payload samples:
+
+```bash
+OPEN_BANKING_PROVIDER=moneyhub
+OPEN_BANKING_PROVIDER_PAYLOAD_DEBUG=true
+PROVIDER_PAYLOAD_DEBUG_DIR=.debug/provider-payloads
+```
+
+Then run the app, sign in, complete a Moneyhub sandbox connection from Settings / Connected Accounts, and run a manual sync. Redacted inspection files are written under `.debug/provider-payloads`, which is gitignored.
+
+Each inspection file includes:
+
+- redacted account or transaction payload samples
+- unmapped fields
+- missing required fields
+- optional fields present
+- unknown account subtypes
+- unknown transaction categories
+
+The redactor removes tokens, account numbers, full names, addresses, account references, provider IDs, user IDs, connection IDs, IBANs, PANs, and token-like strings. Do not commit `.debug` output. Committed tests use only synthetic fixtures from `tests/fixtures/moneyhub-provider-payloads.ts`.
 
 ## Sync Workflow
 
@@ -110,13 +168,43 @@ The sync workflow:
 - Reads provider accounts through the selected adapter.
 - Maps provider account payloads into app account models.
 - Upserts accounts.
-- Reads recent provider transactions.
+- Requests provider sync where supported.
+- Reads recent provider transactions for each synced provider account.
 - Maps provider transaction payloads into app transaction models.
-- Upserts transactions.
+- Upserts transactions using stable provider transaction IDs and a dedupe index.
+- Preserves reviewed user categories, merchant overrides, notes, and transfer flags when repeat syncs update an existing transaction.
+- Reconciles pending-to-posted changes, provider status changes, soft-deleted provider transactions, and restored provider transactions.
 - Records `provider_sync_events`.
 - Updates `bank_connections` status and `lastSyncedAt`.
 - Creates in-app notifications for connection success, sync success, sync failure, consent attention, and connection revocation.
 - Records failures with safe user-facing messages only.
+
+## Event-Driven Sync
+
+Phase 8A handles Moneyhub sandbox transaction webhooks for:
+
+- `newTransactions`
+- `updatedTransactions`
+- `deletedTransactions`
+- `restoredTransactions`
+- sync completed events where available
+- sync failed events where available
+
+Webhook handling is idempotent by `provider + provider_event_id`. If the same webhook arrives twice, the app returns a safe success response and does not duplicate sync jobs, notifications, or audit events.
+
+The sync queue supports:
+
+- `enqueueConnectionSync()`
+- `enqueueAccountSync()`
+- `processPendingSyncJobs()`
+- `markSyncJobComplete()`
+- `markSyncJobFailed()`
+
+Use Supabase for persistent webhook events and sync jobs when configured. Without Supabase, tests and local development use mock/in-memory fallback. Scheduled fallback sync should be configured with `CRON_SECRET`.
+
+Call scheduled sync with `Authorization: Bearer <CRON_SECRET>` or `x-cron-secret: <CRON_SECRET>`. The route skips disconnected, revoked, expired, re-consent, and recently synced connections to avoid excessive provider polling.
+
+Transaction notifications remain privacy-safe outside the authenticated app. Browser-safe copy uses generic wording such as "New transaction detected", "Transaction updated", "Account connection needs attention", and "Potential duplicate payment".
 
 Target real-world institutions remain:
 
@@ -149,6 +237,8 @@ The migration covers:
 - ai_insights
 - alerts
 - provider_sync_events
+- provider_webhook_events
+- sync_jobs
 - provider_tokens
 - audit_log
 - notification_preferences
@@ -216,6 +306,8 @@ Notification generation is deterministic in `src/lib/notifications.ts`:
 - Budget warning when usage exceeds the configured percentage.
 - Consent renewal when account consent is expired or expiring soon.
 - Sync failure when a provider connection has failed.
+- New or updated transactions from provider webhooks.
+- Large transaction and potential duplicate payment alerts when transaction activity warrants review.
 - Manual review when a manual item review date is due.
 - Safe-to-spend change when the value changes materially.
 
@@ -230,6 +322,8 @@ Notification text shown outside the authenticated app is privacy-safe by default
 - Account connection needs attention
 - Manual item needs review
 - Safe-to-spend changed
+- New transaction detected
+- Potential duplicate payment
 
 Detailed amounts, bank names, bill names, and account names should only appear inside the authenticated app.
 
@@ -254,7 +348,7 @@ The adapter interface supports:
 - `refreshConnection()`
 - `revokeConnection()`
 
-Phase 6 keeps `mockOpenBankingProvider` available and adds a Moneyhub sandbox-ready adapter. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
+Phase 8A keeps `mockOpenBankingProvider` available, uses the Moneyhub sandbox adapter behind the provider abstraction, and adds webhook-driven transaction sync with scheduled/manual fallback. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
 
 ## Open Banking Token Boundary
 
@@ -278,6 +372,12 @@ MONEYHUB_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
 MONEYHUB_WEBHOOK_SECRET=
 MONEYHUB_API_BASE_URL=https://api.moneyhub.co.uk/v2.0
 MONEYHUB_AUTH_BASE_URL=https://identity.moneyhub.co.uk
+MONEYHUB_JWKS_URL=
+MONEYHUB_PRIVATE_KEY=
+MONEYHUB_KEY_ID=
+OPEN_BANKING_PROVIDER_PAYLOAD_DEBUG=false
+PROVIDER_PAYLOAD_DEBUG_DIR=.debug/provider-payloads
+CRON_SECRET=
 ```
 
 Do not commit real credentials, client secrets, access tokens, refresh tokens, consent artefacts, or real financial data.
@@ -324,6 +424,8 @@ Core domain types:
 - `ProviderAccount`
 - `ProviderTransaction`
 - `ProviderSyncEvent`
+- `ProviderWebhookEvent`
+- `SyncJob`
 - `Category`
 - `Transaction`
 - `Budget`

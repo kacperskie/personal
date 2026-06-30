@@ -3,6 +3,7 @@ import type {
   BankConnection,
   Bill,
   Budget,
+  Category,
   ManualFinanceItem,
   ProviderSyncEvent,
   SavingsGoal,
@@ -13,6 +14,7 @@ import {
   mockBankConnections,
   mockBills,
   mockBudgets,
+  mockCategories,
   mockManualFinanceItems,
   mockSavingsGoals,
   mockTransactionRecords,
@@ -24,11 +26,13 @@ import {
   bankConnectionToRow,
   billFromRow,
   budgetFromRow,
+  categoryFromRow,
   manualFinanceItemFromRow,
   manualFinanceItemToRow,
   savingsGoalFromRow,
   transactionFromRow,
 } from "@/lib/repositories/mappers";
+import { mergeSyncedTransaction } from "@/lib/bank-providers/provider-mappers";
 import { createAuditEvent } from "@/lib/repositories/audit";
 import type { AuditEventInput } from "@/lib/repositories/audit";
 import {
@@ -524,34 +528,61 @@ export async function upsertTransaction(transaction: Transaction): Promise<Trans
     return transaction;
   }
 
+  const { data: existingRow, error: existingError } = await context.supabase
+    .from("transactions")
+    .select("*")
+    .eq("id", transaction.id)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  const mergedTransaction = mergeSyncedTransaction(
+    existingRow ? transactionFromRow(existingRow) : null,
+    transaction,
+  );
+
   await context.supabase.from("categories").upsert({
-    id: transaction.categoryId,
+    id: mergedTransaction.categoryId,
     user_id: context.userId,
-    name: transaction.categoryId === "cat_uncategorised" ? "Uncategorised" : transaction.categoryId,
+    name:
+      mergedTransaction.categoryId === "cat_uncategorised"
+        ? "Uncategorised"
+        : mergedTransaction.categoryId,
     parent_id: null,
-    kind: transaction.kind,
+    kind: mergedTransaction.kind,
     budget_type: "transfer",
-    include_in_budget: transaction.kind === "expense",
+    include_in_budget: mergedTransaction.kind === "expense",
     status: "active",
   });
 
   const { data, error } = await context.supabase
     .from("transactions")
     .upsert({
-      id: transaction.id,
+      id: mergedTransaction.id,
       user_id: context.userId,
-      account_id: transaction.accountId,
-      category_id: transaction.categoryId,
-      date: transaction.date,
-      merchant: transaction.merchant,
-      description: transaction.description,
-      amount: transaction.amount,
-      currency: transaction.currency,
-      kind: transaction.kind,
-      status: transaction.status,
-      flags: transaction.flags,
-      created_at: transaction.createdAt,
-      updated_at: transaction.updatedAt,
+      account_id: mergedTransaction.accountId,
+      category_id: mergedTransaction.categoryId,
+      provider_connection_id: mergedTransaction.providerConnectionId ?? null,
+      provider_transaction_id: mergedTransaction.providerTransactionId ?? null,
+      provider_updated_at: mergedTransaction.providerUpdatedAt ?? null,
+      provider_status: mergedTransaction.providerStatus ?? null,
+      provider_deleted_at: mergedTransaction.providerDeletedAt ?? null,
+      provider_restored_at: mergedTransaction.providerRestoredAt ?? null,
+      date: mergedTransaction.date,
+      merchant: mergedTransaction.merchant,
+      description: mergedTransaction.description,
+      amount: mergedTransaction.amount,
+      currency: mergedTransaction.currency,
+      kind: mergedTransaction.kind,
+      status: mergedTransaction.status,
+      flags: mergedTransaction.flags,
+      pending: mergedTransaction.pending ?? false,
+      notes: mergedTransaction.notes ?? null,
+      raw_payload: {},
+      created_at: mergedTransaction.createdAt,
+      updated_at: mergedTransaction.updatedAt,
     })
     .select()
     .single();
@@ -580,6 +611,25 @@ export async function getTransactions(): Promise<Transaction[]> {
   }
 
   return data.map(transactionFromRow);
+}
+
+export async function getCategories(): Promise<Category[]> {
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return mockCategories;
+  }
+
+  const { data, error } = await context.supabase
+    .from("categories")
+    .select("*")
+    .order("name");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(categoryFromRow);
 }
 
 export async function getBudgets(): Promise<Budget[]> {

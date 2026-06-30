@@ -181,6 +181,7 @@ const transactionsByConnectionId: Record<string, ProviderTransaction[]> = {
       providerAccountId: "amex_card_001",
       providerTransactionId: "amex_txn_001",
       date: "2026-06-27",
+      providerUpdatedAt: "2026-06-27T12:00:00.000Z",
       merchant: "City Lunch Bar",
       description: "Lunch and coffee",
       amount: -18.5,
@@ -197,6 +198,7 @@ const transactionsByConnectionId: Record<string, ProviderTransaction[]> = {
       providerAccountId: "nw_current_001",
       providerTransactionId: "nw_txn_001",
       date: "2026-06-28",
+      providerUpdatedAt: "2026-06-28T12:00:00.000Z",
       merchant: "Northside Grocers",
       description: "Weekly food shop",
       amount: -64.2,
@@ -211,6 +213,7 @@ const transactionsByConnectionId: Record<string, ProviderTransaction[]> = {
       providerAccountId: "nw_current_001",
       providerTransactionId: "nw_txn_transfer_001",
       date: "2026-06-26",
+      providerUpdatedAt: "2026-06-26T12:00:00.000Z",
       merchant: "Own account transfer",
       description: "Transfer to emergency fund",
       amount: -300,
@@ -227,6 +230,7 @@ const transactionsByConnectionId: Record<string, ProviderTransaction[]> = {
       providerAccountId: "revolut_current_001",
       providerTransactionId: "rev_txn_001",
       date: "2026-06-24",
+      providerUpdatedAt: "2026-06-24T12:00:00.000Z",
       merchant: "Online Homeware",
       description: "Household items",
       amount: -42.9,
@@ -316,7 +320,10 @@ export class MockOpenBankingProvider implements OpenBankingProviderAdapter {
     return (transactionsByConnectionId[connectionId] ?? []).filter((transaction) => {
       const afterStart = !query?.dateFrom || transaction.date >= query.dateFrom;
       const beforeEnd = !query?.dateTo || transaction.date <= query.dateTo;
-      return afterStart && beforeEnd;
+      const accountMatches =
+        !query?.providerAccountId ||
+        transaction.providerAccountId === query.providerAccountId;
+      return afterStart && beforeEnd && accountMatches;
     });
   }
 

@@ -5,6 +5,7 @@ import type {
   Transaction,
 } from "@/lib/domain";
 import type { OpenBankingProviderAdapter } from "@/lib/bank-providers/types";
+import type { ProviderRequestContext } from "@/lib/bank-providers/types";
 import { toProviderSafeError } from "@/lib/bank-providers/provider-errors";
 import {
   providerAccountToAccount,
@@ -51,11 +52,13 @@ export async function syncBankConnection({
   userId,
   connection,
   provider,
+  providerContext,
   dependencies,
 }: {
   userId: string;
   connection: BankConnection;
   provider: OpenBankingProviderAdapter;
+  providerContext?: ProviderRequestContext;
   dependencies: SyncWorkflowDependencies;
 }): Promise<SyncWorkflowResult> {
   const startedAt = new Date().toISOString();
@@ -73,7 +76,16 @@ export async function syncBankConnection({
   syncEvents.push(await dependencies.recordProviderSyncEvent(startedEvent));
 
   try {
-    const providerAccounts = await provider.getAccounts(connection.id);
+    const refreshEvent = await provider.refreshConnection(connection.id, providerContext);
+    syncEvents.push(await dependencies.recordProviderSyncEvent(refreshEvent));
+    const fetchedProviderAccounts = await provider.getAccounts(connection.id, providerContext);
+    const scopedProviderAccountIds = new Set(providerContext?.providerAccountIds ?? []);
+    const providerAccounts =
+      scopedProviderAccountIds.size === 0
+        ? fetchedProviderAccounts
+        : fetchedProviderAccounts.filter((account) =>
+            scopedProviderAccountIds.has(account.providerAccountId),
+          );
     const accountIdByProviderAccountId = new Map<string, string>();
     let accountsUpserted = 0;
 
@@ -89,23 +101,30 @@ export async function syncBankConnection({
       accountsUpserted += 1;
     }
 
-    const providerTransactions = await provider.getTransactions(connection.id, {
-      dateFrom: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-      dateTo: startedAt.slice(0, 10),
-    });
     let transactionsUpserted = 0;
 
-    for (const providerTransaction of providerTransactions) {
-      const accountId = accountIdByProviderAccountId.get(providerTransaction.providerAccountId);
+    for (const providerAccount of providerAccounts) {
+      const providerTransactions = await provider.getTransactions(connection.id, {
+        dateFrom: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+        dateTo: startedAt.slice(0, 10),
+        providerAccountId: providerAccount.providerAccountId,
+        providerUserId: providerContext?.providerUserId,
+        providerConnectionId: providerContext?.providerConnectionId,
+        tokenReference: providerContext?.tokenReference,
+      });
 
-      if (!accountId) {
-        continue;
+      for (const providerTransaction of providerTransactions) {
+        const accountId = accountIdByProviderAccountId.get(providerTransaction.providerAccountId);
+
+        if (!accountId) {
+          continue;
+        }
+
+        await dependencies.upsertTransaction(
+          providerTransactionToTransaction(providerTransaction, accountId),
+        );
+        transactionsUpserted += 1;
       }
-
-      await dependencies.upsertTransaction(
-        providerTransactionToTransaction(providerTransaction, accountId),
-      );
-      transactionsUpserted += 1;
     }
 
     const completedAt = new Date().toISOString();

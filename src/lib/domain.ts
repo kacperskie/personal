@@ -177,6 +177,8 @@ export type ProviderTransaction = {
   providerAccountId: string;
   providerTransactionId: string;
   date: string;
+  providerUpdatedAt: string | null;
+  providerStatus?: "pending" | "posted" | "deleted" | "restored" | "unknown";
   merchant: string;
   description: string;
   amount: number;
@@ -194,6 +196,60 @@ export type ProviderSyncEvent = {
   message: string;
   startedAt: string;
   finishedAt: string | null;
+};
+
+export type ProviderWebhookEventType =
+  | "newTransactions"
+  | "updatedTransactions"
+  | "deletedTransactions"
+  | "restoredTransactions"
+  | "syncCompleted"
+  | "syncFailed";
+
+export type ProviderWebhookProcessingStatus =
+  | "received"
+  | "queued"
+  | "processed"
+  | "failed"
+  | "duplicate";
+
+export type ProviderWebhookEvent = {
+  id: string;
+  userId: string;
+  provider: BankProvider;
+  providerEventId: string;
+  providerEventType: ProviderWebhookEventType;
+  receivedAt: string;
+  processedAt: string | null;
+  processingStatus: ProviderWebhookProcessingStatus;
+  connectionId: string;
+  accountIds: string[];
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SyncJobScope = "connection" | "account";
+
+export type SyncJobStatus = "pending" | "processing" | "completed" | "failed";
+
+export type SyncJob = {
+  id: string;
+  userId: string;
+  provider: BankProvider;
+  scope: SyncJobScope;
+  connectionId: string;
+  accountIds: string[];
+  status: SyncJobStatus;
+  reason: string;
+  idempotencyKey: string;
+  attempts: number;
+  errorMessage: string | null;
+  scheduledFor: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CategoryKind = "income" | "expense" | "transfer";
@@ -219,6 +275,12 @@ export type Transaction = {
   id: string;
   accountId: string;
   categoryId: string;
+  providerConnectionId?: string | null;
+  providerTransactionId?: string | null;
+  providerUpdatedAt?: string | null;
+  providerStatus?: "pending" | "posted" | "deleted" | "restored" | "unknown" | null;
+  providerDeletedAt?: string | null;
+  providerRestoredAt?: string | null;
   date: string;
   merchant: string;
   description: string;
@@ -227,6 +289,8 @@ export type Transaction = {
   kind: CategoryKind;
   status: "reviewed" | "needs_review" | "suggested" | "excluded";
   flags: string[];
+  pending?: boolean;
+  notes?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -372,6 +436,10 @@ export type NotificationType =
   | "connection_successful"
   | "sync_successful"
   | "connection_revoked"
+  | "new_transaction"
+  | "transaction_updated"
+  | "large_transaction"
+  | "potential_duplicate_payment"
   | "payday_planning"
   | "manual_item_review"
   | "safe_to_spend_change";

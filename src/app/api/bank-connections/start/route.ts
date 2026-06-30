@@ -63,6 +63,7 @@ export async function POST(request: Request) {
       status: start.connection.status,
       authorizationUrl: start.authorizationUrl,
       providerConfigured: start.providerConfigured,
+      state: start.state,
       message: start.safeMessage,
     });
   } catch (error) {

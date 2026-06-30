@@ -4,6 +4,7 @@ import type {
   Bill,
   Budget,
   AppNotification,
+  Category,
   ManualFinanceItem,
   NotificationPreference,
   PushSubscriptionRecord,
@@ -17,6 +18,7 @@ type BankConnectionRow = Database["public"]["Tables"]["bank_connections"]["Row"]
 type ManualFinanceItemRow =
   Database["public"]["Tables"]["manual_finance_items"]["Row"];
 type TransactionRow = Database["public"]["Tables"]["transactions"]["Row"];
+type CategoryRow = Database["public"]["Tables"]["categories"]["Row"];
 type BudgetRow = Database["public"]["Tables"]["budgets"]["Row"];
 type BillRow = Database["public"]["Tables"]["bills"]["Row"];
 type SavingsGoalRow = Database["public"]["Tables"]["savings_goals"]["Row"];
@@ -192,6 +194,12 @@ export function transactionFromRow(row: TransactionRow): Transaction {
     id: row.id,
     accountId: row.account_id,
     categoryId: row.category_id,
+    providerConnectionId: row.provider_connection_id,
+    providerTransactionId: row.provider_transaction_id,
+    providerUpdatedAt: row.provider_updated_at,
+    providerStatus: row.provider_status,
+    providerDeletedAt: row.provider_deleted_at,
+    providerRestoredAt: row.provider_restored_at,
     date: row.date,
     merchant: row.merchant,
     description: row.description,
@@ -200,8 +208,23 @@ export function transactionFromRow(row: TransactionRow): Transaction {
     kind: row.kind,
     status: row.status,
     flags: row.flags,
+    pending: row.pending,
+    notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function categoryFromRow(row: CategoryRow): Category {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    parentId: row.parent_id,
+    kind: row.kind,
+    budgetType: row.budget_type as Category["budgetType"],
+    includeInBudget: row.include_in_budget,
+    status: row.status,
   };
 }
 

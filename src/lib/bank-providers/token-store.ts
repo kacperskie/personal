@@ -6,7 +6,11 @@ export type ProviderTokenRecord = {
   connectionId: string;
   provider: BankProvider;
   tokenReference: string;
+  providerUserId: string | null;
+  providerConnectionId: string | null;
   expiresAt: string | null;
+  accessTokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
   scopes: string[];
   revokedAt: string | null;
   createdAt: string;
@@ -18,7 +22,11 @@ export type SaveProviderTokenInput = {
   connectionId: string;
   provider: BankProvider;
   encryptedTokenPlaceholder: string;
+  providerUserId?: string | null;
+  providerConnectionId?: string | null;
   expiresAt: string | null;
+  accessTokenExpiresAt?: string | null;
+  refreshTokenExpiresAt?: string | null;
   scopes: string[];
 };
 
@@ -37,7 +45,11 @@ export function toClientSafeTokenRecord(record: ProviderTokenRecord | null) {
     connectionId: record.connectionId,
     provider: record.provider,
     tokenReference: record.tokenReference,
+    providerUserId: record.providerUserId,
+    providerConnectionId: record.providerConnectionId,
     expiresAt: record.expiresAt,
+    accessExpiresAt: record.accessTokenExpiresAt,
+    refreshExpiresAt: record.refreshTokenExpiresAt,
     scopes: record.scopes,
     revokedAt: record.revokedAt,
     updatedAt: record.updatedAt,
@@ -56,7 +68,11 @@ export async function saveProviderToken(
     connectionId: input.connectionId,
     provider: input.provider,
     tokenReference: `token-ref:${input.provider}:${input.connectionId}`,
+    providerUserId: input.providerUserId ?? null,
+    providerConnectionId: input.providerConnectionId ?? null,
     expiresAt: input.expiresAt,
+    accessTokenExpiresAt: input.accessTokenExpiresAt ?? input.expiresAt,
+    refreshTokenExpiresAt: input.refreshTokenExpiresAt ?? null,
     scopes: input.scopes,
     revokedAt: null,
     createdAt: now,

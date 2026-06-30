@@ -15,7 +15,11 @@ import type {
   NotificationSeverity,
   NotificationStatus,
   NotificationType,
+  ProviderWebhookEventType,
+  ProviderWebhookProcessingStatus,
   Recurrence,
+  SyncJobScope,
+  SyncJobStatus,
 } from "@/lib/domain";
 
 export type Json =
@@ -150,6 +154,12 @@ export type Database = {
           user_id: string;
           account_id: string;
           category_id: string;
+          provider_connection_id: string | null;
+          provider_transaction_id: string | null;
+          provider_updated_at: string | null;
+          provider_status: "pending" | "posted" | "deleted" | "restored" | "unknown" | null;
+          provider_deleted_at: string | null;
+          provider_restored_at: string | null;
           date: string;
           merchant: string;
           description: string;
@@ -158,6 +168,9 @@ export type Database = {
           kind: CategoryKind;
           status: "reviewed" | "needs_review" | "suggested" | "excluded";
           flags: string[];
+          pending: boolean;
+          notes: string | null;
+          raw_payload: Record<string, unknown>;
           created_at: string;
           updated_at: string;
         };
@@ -388,6 +401,63 @@ export type Database = {
           started_at: string;
         };
         Update: Partial<Database["public"]["Tables"]["provider_sync_events"]["Row"]>;
+        Relationships: [];
+      };
+      provider_webhook_events: {
+        Row: {
+          id: string;
+          user_id: string;
+          provider: BankProvider;
+          provider_event_id: string;
+          provider_event_type: ProviderWebhookEventType;
+          received_at: string;
+          processed_at: string | null;
+          processing_status: ProviderWebhookProcessingStatus;
+          connection_id: string;
+          account_ids: string[];
+          error_message: string | null;
+          raw_payload: Record<string, unknown>;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["provider_webhook_events"]["Row"]> & {
+          user_id: string;
+          provider: BankProvider;
+          provider_event_id: string;
+          provider_event_type: ProviderWebhookEventType;
+          connection_id: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["provider_webhook_events"]["Row"]>;
+        Relationships: [];
+      };
+      sync_jobs: {
+        Row: {
+          id: string;
+          user_id: string;
+          provider: BankProvider;
+          scope: SyncJobScope;
+          connection_id: string;
+          account_ids: string[];
+          status: SyncJobStatus;
+          reason: string;
+          idempotency_key: string;
+          attempts: number;
+          error_message: string | null;
+          scheduled_for: string | null;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["sync_jobs"]["Row"]> & {
+          user_id: string;
+          provider: BankProvider;
+          scope: SyncJobScope;
+          connection_id: string;
+          reason: string;
+          idempotency_key: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["sync_jobs"]["Row"]>;
         Relationships: [];
       };
       audit_log: {
