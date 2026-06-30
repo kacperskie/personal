@@ -1,9 +1,11 @@
 import type {
   Account,
+  BankConnection,
   Bill,
   Budget,
   BudgetPeriod,
   Category,
+  ConnectionLifecycleStatus,
   Debt,
   ManualFinanceItem,
   SavingsGoal,
@@ -76,6 +78,11 @@ export type DebtSummary = {
   items: DebtSummaryItem[];
 };
 
+export type LinkedSavingsGoalBalance = {
+  goalId: string;
+  balance: number;
+};
+
 const toneByStatus: Record<BudgetPaceStatus, Tone> = {
   "under pace": "good",
   "on pace": "neutral",
@@ -87,12 +94,33 @@ function isActiveStatus(status: string) {
   return status === "active" || status === "confirmed" || status === "pending_review";
 }
 
+function isUsableAccount(account: Account) {
+  return isActiveStatus(account.status) && account.syncStatus !== "disconnected";
+}
+
 function isDateInRange(date: string | null, startDate: string, endDate: string) {
   return Boolean(date && date >= startDate && date <= endDate);
 }
 
 function absoluteAmount(value: number) {
   return Math.abs(value);
+}
+
+function isOwnAccountTransfer(transaction: Transaction) {
+  return transaction.kind === "transfer" || transaction.flags.includes("own_account_transfer");
+}
+
+function accountBalanceForCash(account: Account) {
+  return Math.max(account.availableBalance ?? account.balance, 0);
+}
+
+function accountIsLiquid(account: Account) {
+  return (
+    account.type === "current_account" ||
+    account.type === "savings" ||
+    account.type === "cash" ||
+    account.type === "offline"
+  );
 }
 
 function manualItemAffectsCurrentCash(item: ManualFinanceItem) {
@@ -135,14 +163,35 @@ export function calculateTotalCurrentCash(
   manualFinanceItems: ManualFinanceItem[] = [],
 ) {
   const accountCash = accounts
-    .filter((account) => account.includeInCash && isActiveStatus(account.status))
-    .reduce((total, account) => total + Math.max(account.balance, 0), 0);
+    .filter(
+      (account) =>
+        account.includeInCashflow && isUsableAccount(account) && accountIsLiquid(account),
+    )
+    .reduce((total, account) => total + accountBalanceForCash(account), 0);
 
   const manualCash = manualFinanceItems
     .filter(manualItemAffectsCurrentCash)
     .reduce((total, item) => total + item.amount, 0);
 
   return accountCash + manualCash;
+}
+
+export function calculateSafeToSpendEligibleCash(accounts: Account[]) {
+  return accounts
+    .filter((account) => account.includeInSafeToSpend && isUsableAccount(account))
+    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+}
+
+export function calculateBillsAccountBalance(accounts: Account[]) {
+  return accounts
+    .filter((account) => account.isBillsAccount && isUsableAccount(account))
+    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+}
+
+export function calculateCashflowAccountBalance(accounts: Account[]) {
+  return accounts
+    .filter((account) => account.includeInCashflow && isUsableAccount(account))
+    .reduce((total, account) => total + accountBalanceForCash(account), 0);
 }
 
 export function getUpcomingManualCashflowItems(
@@ -317,6 +366,7 @@ export function calculateMonthlySpending(
       (transaction) =>
         transaction.kind === "expense" &&
         transaction.amount < 0 &&
+        !isOwnAccountTransfer(transaction) &&
         isDateInRange(transaction.date, period.startDate, period.endDate),
     )
     .reduce((total, transaction) => total + absoluteAmount(transaction.amount), 0);
@@ -345,6 +395,7 @@ export function calculateSpendByCategory(
       (transaction) =>
         transaction.kind === "expense" &&
         transaction.amount < 0 &&
+        !isOwnAccountTransfer(transaction) &&
         isDateInRange(transaction.date, period.startDate, period.endDate),
     )
     .reduce<Record<string, number>>((groups, transaction) => {
@@ -456,16 +507,41 @@ export function calculateProjectedMonthEndBalance({
   return currentCash + expectedIncome - plannedOutflows;
 }
 
-export function calculateSavingsGoalProgress(goal: SavingsGoal): SavingsGoalProgress {
+export function calculateSavingsGoalProgress(
+  goal: SavingsGoal,
+  linkedAccountBalance = 0,
+): SavingsGoalProgress {
+  const currentAmount = goal.currentAmount + linkedAccountBalance;
   const progressRatio =
-    goal.targetAmount <= 0 ? 0 : Math.min(goal.currentAmount / goal.targetAmount, 1);
+    goal.targetAmount <= 0 ? 0 : Math.min(currentAmount / goal.targetAmount, 1);
 
   return {
     goalId: goal.id,
     progressRatio,
     progressPercentage: progressRatio * 100,
-    remainingAmount: Math.max(goal.targetAmount - goal.currentAmount, 0),
+    remainingAmount: Math.max(goal.targetAmount - currentAmount, 0),
   };
+}
+
+export function calculateLinkedSavingsGoalBalance(accounts: Account[], goalId: string) {
+  return accounts
+    .filter(
+      (account) =>
+        account.linkedGoalIds.includes(goalId) &&
+        isUsableAccount(account) &&
+        account.isSavingsAccount,
+    )
+    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+}
+
+export function calculateLinkedSavingsGoalBalances(
+  accounts: Account[],
+  goals: SavingsGoal[],
+): LinkedSavingsGoalBalance[] {
+  return goals.map((goal) => ({
+    goalId: goal.id,
+    balance: calculateLinkedSavingsGoalBalance(accounts, goal.id),
+  }));
 }
 
 export function calculateTotalAssets(
@@ -473,7 +549,7 @@ export function calculateTotalAssets(
   manualFinanceItems: ManualFinanceItem[],
 ) {
   const accountAssets = accounts
-    .filter((account) => account.includeInNetWorth && isActiveStatus(account.status))
+    .filter((account) => account.includeInNetWorth && isUsableAccount(account))
     .reduce((total, account) => total + Math.max(account.balance, 0), 0);
 
   const manualAssets = manualFinanceItems
@@ -499,7 +575,7 @@ export function calculateTotalLiabilities(
     .filter(
       (account) =>
         account.includeInNetWorth &&
-        isActiveStatus(account.status) &&
+        isUsableAccount(account) &&
         account.balance < 0 &&
         !debtAccountIds.has(account.id),
     )
@@ -530,7 +606,31 @@ export function calculateNetWorth(
 export function calculateDebtSummary(
   debts: Debt[],
   manualFinanceItems: ManualFinanceItem[],
+  accounts: Account[] = [],
 ): DebtSummary {
+  const debtAccountIds = new Set(
+    debts
+      .filter((debt) => isActiveStatus(debt.status))
+      .map((debt) => debt.accountId)
+      .filter(Boolean),
+  );
+  const accountDebtItems: DebtSummaryItem[] = accounts
+    .filter(
+      (account) =>
+        isUsableAccount(account) &&
+        account.balance < 0 &&
+        (account.type === "credit_card" || account.type === "loan") &&
+        !debtAccountIds.has(account.id),
+    )
+    .map((account) => ({
+      id: account.id,
+      name: account.name,
+      balance: absoluteAmount(account.balance),
+      minimumPayment: 0,
+      apr: null,
+      source: "debt",
+    }));
+
   const debtItems: DebtSummaryItem[] = debts
     .filter((debt) => isActiveStatus(debt.status))
     .map((debt) => ({
@@ -557,7 +657,7 @@ export function calculateDebtSummary(
       source: "manual",
     }));
 
-  const items = [...debtItems, ...manualDebtItems];
+  const items = [...accountDebtItems, ...debtItems, ...manualDebtItems];
   const totalDebt = items.reduce((total, item) => total + item.balance, 0);
   const totalMinimumPayment = items.reduce(
     (total, item) => total + item.minimumPayment,
@@ -574,4 +674,18 @@ export function calculateDebtSummary(
     averageApr: totalDebt === 0 ? 0 : aprWeightedBalance / totalDebt,
     items,
   };
+}
+
+export function getConnectionLifecycleStatus(
+  connection: BankConnection,
+  asOfDate: string,
+): ConnectionLifecycleStatus {
+  if (
+    connection.consentStatus === "expired" ||
+    (connection.consentExpiresAt && connection.consentExpiresAt < asOfDate)
+  ) {
+    return "needs_reconsent";
+  }
+
+  return connection.status;
 }

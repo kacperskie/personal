@@ -42,19 +42,158 @@ export type AccountType =
   | "pension"
   | "loan";
 
+export type AccountSubtype =
+  | "current"
+  | "savings"
+  | "pocket"
+  | "vault"
+  | "credit_card"
+  | "charge_card"
+  | "loan"
+  | "cash"
+  | "pension"
+  | "investment"
+  | "isa"
+  | "offline"
+  | "other";
+
+export type AccountPurpose =
+  | "main_current_account"
+  | "bills_account"
+  | "everyday_spending"
+  | "emergency_fund"
+  | "short_term_savings"
+  | "holiday_fund"
+  | "pet_fund"
+  | "house_deposit"
+  | "credit_card"
+  | "loan_account"
+  | "pension"
+  | "investment"
+  | "cash"
+  | "offline_account"
+  | "other";
+
+export type AccountRole =
+  | "spending"
+  | "bills"
+  | "savings"
+  | "credit"
+  | "loan"
+  | "investment"
+  | "pension"
+  | "cash"
+  | "offline"
+  | "other";
+
+export type BankProvider = "moneyhub" | "truelayer" | "tink" | "plaid" | "mock";
+
+export type ConnectionLifecycleStatus =
+  | "not_connected"
+  | "connecting"
+  | "connected"
+  | "needs_reconsent"
+  | "syncing"
+  | "sync_failed"
+  | "disconnected";
+
+export type ConsentStatus =
+  | "not_started"
+  | "pending"
+  | "active"
+  | "expired"
+  | "revoked"
+  | "failed";
+
 export type Account = {
   id: string;
   userId: string;
+  providerConnectionId: string | null;
+  providerAccountId: string | null;
+  institutionName: string;
+  institutionId: string;
   name: string;
+  officialName: string;
   type: AccountType;
+  subtype: AccountSubtype;
   currency: CurrencyCode;
   balance: number;
-  includeInCash: boolean;
+  availableBalance: number | null;
+  creditLimit: number | null;
+  mask: string | null;
+  purpose: AccountPurpose;
+  accountRole: AccountRole;
+  includeInCashflow: boolean;
   includeInNetWorth: boolean;
-  provider: "mock" | "manual";
+  includeInSafeToSpend: boolean;
+  isSpendingAccount: boolean;
+  isBillsAccount: boolean;
+  isSavingsAccount: boolean;
+  linkedGoalIds: string[];
+  syncStatus: ConnectionLifecycleStatus;
+  lastSyncedAt: string | null;
+  consentExpiresAt: string | null;
+  notes: string | null;
+  provider: BankProvider | "manual";
   status: EntityStatus;
   createdAt: string;
   updatedAt: string;
+};
+
+export type BankConnection = {
+  id: string;
+  provider: BankProvider;
+  institutionName: string;
+  institutionId: string;
+  status: ConnectionLifecycleStatus;
+  consentStatus: ConsentStatus;
+  consentStartedAt: string | null;
+  consentExpiresAt: string | null;
+  lastSyncedAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProviderAccount = {
+  providerConnectionId: string;
+  providerAccountId: string;
+  institutionName: string;
+  institutionId: string;
+  name: string;
+  officialName: string;
+  type: AccountType;
+  subtype: AccountSubtype;
+  balance: number;
+  availableBalance: number | null;
+  creditLimit: number | null;
+  currency: CurrencyCode;
+  mask: string | null;
+};
+
+export type ProviderTransaction = {
+  id: string;
+  providerConnectionId: string;
+  providerAccountId: string;
+  providerTransactionId: string;
+  date: string;
+  merchant: string;
+  description: string;
+  amount: number;
+  currency: CurrencyCode;
+  pending: boolean;
+  category: string | null;
+  isOwnAccountTransfer: boolean;
+};
+
+export type ProviderSyncEvent = {
+  id: string;
+  providerConnectionId: string;
+  provider: BankProvider;
+  status: ConnectionLifecycleStatus;
+  message: string;
+  startedAt: string;
+  finishedAt: string | null;
 };
 
 export type CategoryKind = "income" | "expense" | "transfer";

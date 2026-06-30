@@ -1,28 +1,35 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateBillsDueBeforePayday,
+  calculateBillsAccountBalance,
   calculateBudgetHealth,
   calculateBudgetPace,
   calculateBudgetRemaining,
   calculateBudgetUsagePercentage,
+  calculateCashflowAccountBalance,
   calculateDebtPaymentsDueBeforePayday,
   calculateDebtSummary,
+  calculateLinkedSavingsGoalBalance,
   calculateMonthlyIncome,
   calculateMonthlySpending,
   calculateNetWorth,
   calculateProjectedMonthEndBalance,
   calculateSafeToSpend,
   calculateSafeToSpendAmount,
+  calculateSafeToSpendEligibleCash,
   calculateSavingsGoalProgress,
   calculateSpendByCategory,
   calculateTotalAssets,
   calculateTotalCurrentCash,
   calculateTotalLiabilities,
+  getConnectionLifecycleStatus,
   getUpcomingBillItems,
   getUpcomingManualCashflowItems,
 } from "../src/lib/finance";
+import { mockOpenBankingProvider } from "../src/lib/bank-providers";
 import {
   mockAccounts,
+  mockBankConnections,
   mockBills,
   mockBudgetPeriods,
   mockBudgets,
@@ -43,9 +50,47 @@ const nextPaydayDate = "2026-07-25";
 describe("finance calculations", () => {
   it("calculates total current cash from cash accounts and manual cash items", () => {
     expect(calculateTotalCurrentCash(mockAccounts, mockManualFinanceItems)).toBeCloseTo(
-      3905.7,
+      5290.7,
       2,
     );
+  });
+
+  it("excludes bills, savings, and ringfenced accounts from safe-to-spend", () => {
+    expect(calculateSafeToSpendEligibleCash(mockAccounts)).toBeCloseTo(3905.7, 2);
+    expect(
+      calculateSafeToSpendEligibleCash(
+        mockAccounts.filter((account) => account.id === "acct_nationwide_bills"),
+      ),
+    ).toBe(0);
+    expect(
+      calculateSafeToSpendEligibleCash(
+        mockAccounts.filter((account) => account.id === "acct_nationwide_emergency"),
+      ),
+    ).toBe(0);
+  });
+
+  it("counts Amex credit card balance as a liability", () => {
+    const amexAccount = mockAccounts.filter((account) => account.institutionId === "amex");
+
+    expect(calculateTotalLiabilities(amexAccount, [], [])).toBe(640);
+  });
+
+  it("includes Nationwide bills account in cashflow but not safe-to-spend", () => {
+    const billsAccount = mockAccounts.filter(
+      (account) => account.id === "acct_nationwide_bills",
+    );
+
+    expect(calculateCashflowAccountBalance(billsAccount)).toBe(900);
+    expect(calculateBillsAccountBalance(billsAccount)).toBe(900);
+    expect(calculateSafeToSpendEligibleCash(billsAccount)).toBe(0);
+  });
+
+  it("includes Revolut everyday account in safe-to-spend", () => {
+    const revolutEveryday = mockAccounts.filter(
+      (account) => account.id === "acct_revolut_everyday",
+    );
+
+    expect(calculateSafeToSpendEligibleCash(revolutEveryday)).toBe(485);
   });
 
   it("returns upcoming manual cashflow items", () => {
@@ -94,7 +139,7 @@ describe("finance calculations", () => {
         asOfDate,
         nextPaydayDate,
       ),
-    ).toBe(430);
+    ).toBe(340);
   });
 
   it("calculates safe-to-spend after commitments and buffer", () => {
@@ -102,13 +147,13 @@ describe("finance calculations", () => {
       currentCash: 3905.7,
       billsDueBeforePayday: 1659.89,
       plannedSavingsBeforePayday: 762,
-      debtPaymentsBeforePayday: 430,
+      debtPaymentsBeforePayday: 340,
       minimumBuffer: mockUserProfile.minimumBuffer,
       reservedGoalContributions: 0,
     };
 
-    expect(calculateSafeToSpendAmount(input)).toBeCloseTo(703.81, 2);
-    expect(calculateSafeToSpend(input)).toBeCloseTo(703.81, 2);
+    expect(calculateSafeToSpendAmount(input)).toBeCloseTo(793.81, 2);
+    expect(calculateSafeToSpend(input)).toBeCloseTo(793.81, 2);
   });
 
   it("calculates monthly income from transactions and manual income", () => {
@@ -159,6 +204,17 @@ describe("finance calculations", () => {
       150.6,
       2,
     );
+    expect(spend.find((item) => item.category === "Savings")).toBeUndefined();
+  });
+
+  it("excludes own-account transfers from spending", () => {
+    expect(
+      calculateMonthlySpending(
+        mockTransactionRecords,
+        mockManualFinanceItems,
+        currentPeriod,
+      ),
+    ).toBeCloseTo(1534, 2);
   });
 
   it("calculates budget remaining and usage percentage", () => {
@@ -210,33 +266,67 @@ describe("finance calculations", () => {
   });
 
   it("calculates savings goal progress", () => {
-    const progress = calculateSavingsGoalProgress(mockSavingsGoals[0]);
+    const linkedBalance = calculateLinkedSavingsGoalBalance(
+      mockAccounts,
+      mockSavingsGoals[0].id,
+    );
+    const progress = calculateSavingsGoalProgress(mockSavingsGoals[0], linkedBalance);
 
     expect(progress.progressRatio).toBeCloseTo(0.428, 3);
     expect(progress.progressPercentage).toBeCloseTo(42.8, 1);
     expect(progress.remainingAmount).toBe(2860);
   });
 
+  it("calculates linked savings goal balances from account links", () => {
+    expect(calculateLinkedSavingsGoalBalance(mockAccounts, "goal_emergency_fund")).toBe(
+      2140,
+    );
+    expect(calculateLinkedSavingsGoalBalance(mockAccounts, "goal_holiday")).toBe(520);
+  });
+
   it("calculates total assets, liabilities, and net worth", () => {
     expect(calculateTotalAssets(mockAccounts, mockManualFinanceItems)).toBeCloseTo(
-      21735.7,
+      25780.7,
       2,
     );
     expect(
       calculateTotalLiabilities(mockAccounts, mockDebts, mockManualFinanceItems),
     ).toBe(4440);
     expect(calculateNetWorth(mockAccounts, mockDebts, mockManualFinanceItems)).toBeCloseTo(
-      17295.7,
+      21340.7,
       2,
     );
   });
 
   it("calculates debt summary from debts and payable manual items", () => {
-    const summary = calculateDebtSummary(mockDebts, mockManualFinanceItems);
+    const summary = calculateDebtSummary(mockDebts, mockManualFinanceItems, mockAccounts);
 
     expect(summary.items).toHaveLength(4);
     expect(summary.totalDebt).toBe(4440);
-    expect(summary.totalMinimumPayment).toBe(430);
-    expect(summary.averageApr).toBeCloseTo(8.6342, 4);
+    expect(summary.totalMinimumPayment).toBe(340);
+    expect(summary.averageApr).toBeCloseTo(5.3333, 4);
+  });
+
+  it("marks expired consent as needs re-consent", () => {
+    const revolutConnection = mockBankConnections.find(
+      (connection) => connection.id === "conn_revolut",
+    );
+
+    if (!revolutConnection) {
+      throw new Error("Expected Revolut connection in mock data");
+    }
+
+    expect(getConnectionLifecycleStatus(revolutConnection, asOfDate)).toBe(
+      "needs_reconsent",
+    );
+  });
+
+  it("mock provider adapter returns accounts and transactions", async () => {
+    const accounts = await mockOpenBankingProvider.getAccounts("conn_nationwide");
+    const transactions = await mockOpenBankingProvider.getTransactions("conn_nationwide");
+
+    expect(accounts).toHaveLength(3);
+    expect(accounts.map((account) => account.institutionName)).toContain("Nationwide");
+    expect(transactions.some((transaction) => transaction.isOwnAccountTransfer)).toBe(true);
   });
 });

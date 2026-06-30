@@ -5,6 +5,7 @@ import {
   PiggyBank,
   TrendingDown,
   TrendingUp,
+  WalletCards,
 } from "lucide-react";
 import { BudgetHealthChart } from "@/components/budget-health-chart";
 import { PageHeader } from "@/components/page-header";
@@ -49,6 +50,13 @@ export default function DashboardPage() {
           value={formatCurrency(dashboardSummary.billsDueBeforePayday)}
           detail={`Next payday: ${dashboardSummary.nextPayday}`}
           icon={CalendarClock}
+          tone="saffron"
+        />
+        <StatCard
+          label="Bills account balance"
+          value={formatCurrency(dashboardSummary.billsAccountBalance)}
+          detail="Ringfenced balance excluded from safe-to-spend"
+          icon={WalletCards}
           tone="saffron"
         />
         <StatCard

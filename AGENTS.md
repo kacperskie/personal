@@ -7,7 +7,7 @@ Personal Finance HQ is a private UK-focused personal finance dashboard with an A
 Build a secure web dashboard that helps the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth.
 
 ## MVP scope
-Start with manual CSV import and mock data. Open Banking integration comes after the dashboard, data model, calculations, and AI coach are working.
+Use mock/local data first, then direct account connection through Open Banking as the primary data path. CSV import is not part of the main roadmap. Manual inputs remain required for debts, money owed, offline balances, pensions, future expenses, and anything Open Banking cannot see.
 
 ## Tech stack
 - Next.js
@@ -24,7 +24,7 @@ Start with manual CSV import and mock data. Open Banking integration comes after
 - Never hard-code real financial data.
 - Never store bank login credentials.
 - Require explicit user confirmation before any external action.
-- Keep Open Banking behind a feature flag.
+- Keep real Open Banking API calls behind a feature flag until sandbox credentials, OAuth redirects, secure token storage, and security review are in place.
 - Use UK terminology: current account, Direct Debit, standing order, ISA, pension, council tax.
 
 ## Safety rules

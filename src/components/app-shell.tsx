@@ -4,10 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Bot,
+  BookOpenText,
   CalendarClock,
   CreditCard,
   Gauge,
   LayoutDashboard,
+  Landmark,
   PiggyBank,
   ReceiptText,
   Settings,
@@ -23,10 +25,12 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
+  { label: "Accounts", href: "/accounts", icon: Landmark },
   { label: "Transactions", href: "/transactions", icon: CreditCard },
   { label: "Budgets", href: "/budgets", icon: Gauge },
   { label: "Bills & Subscriptions", href: "/bills-and-subscriptions", icon: ReceiptText },
   { label: "Goals", href: "/goals", icon: PiggyBank },
+  { label: "Manual Entries", href: "/manual-entries", icon: BookOpenText },
   { label: "AI Coach", href: "/ai-coach", icon: Bot },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
@@ -85,10 +89,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mt-6 hidden rounded-lg border border-line bg-paper p-4 lg:block">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-moss">
             <CalendarClock className="h-4 w-4" aria-hidden="true" />
-            Phase 1
+            Phase 3
           </div>
           <p className="mt-2 text-sm leading-5 text-ink/65">
-            Local dashboard shell with mock data only. Open Banking and live AI are off.
+            Mock Open Banking foundation with account purpose assignment. Real APIs are off.
           </p>
         </div>
       </aside>
@@ -98,10 +102,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-teal">
-                Manual CSV MVP foundation
+                Direct account connection foundation
               </p>
               <p className="mt-1 text-sm text-ink/60">
-                All figures shown are mock seed data for product design and testing.
+                Mock American Express, Nationwide, and Revolut data only.
               </p>
             </div>
             <div className="flex w-fit items-center gap-2 rounded-full border border-line bg-white px-3 py-2 text-xs font-semibold text-ink/70">

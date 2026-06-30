@@ -7,9 +7,9 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Manual CSV phase"
+        eyebrow="Connected account activity"
         title="Transactions"
-        description="Mock transaction review surface for Phase 1. CSV import and editing come in a later phase."
+        description="Mock provider transactions for review, categorisation, and transfer handling."
       />
 
       <section className="rounded-lg border border-line bg-white shadow-panel">
@@ -25,7 +25,7 @@ export default function TransactionsPage() {
             className="rounded-lg border border-line bg-paper px-3 py-2 text-sm outline-none focus:border-teal"
             disabled
           >
-            <option>All mock accounts</option>
+            <option>All connected accounts</option>
           </select>
           <select
             aria-label="Filter by category"

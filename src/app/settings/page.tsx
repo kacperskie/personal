@@ -1,4 +1,5 @@
-import { ShieldCheck, ToggleLeft } from "lucide-react";
+import Link from "next/link";
+import { Cable, ShieldCheck, ToggleLeft } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 
 export default function SettingsPage() {
@@ -12,11 +13,26 @@ export default function SettingsPage() {
 
       <section className="grid gap-4 lg:grid-cols-2">
         <article className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <Cable className="h-5 w-5 text-teal" aria-hidden="true" />
+          <h2 className="mt-4 text-base font-semibold text-ink">Connected accounts</h2>
+          <p className="mt-2 text-sm leading-6 text-ink/70">
+            Account connection is the primary data path. This phase uses mock provider
+            data for American Express, Nationwide, and Revolut.
+          </p>
+          <Link
+            href="/settings/connected-accounts"
+            className="mt-4 inline-flex rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+          >
+            View connections
+          </Link>
+        </article>
+
+        <article className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <ShieldCheck className="h-5 w-5 text-teal" aria-hidden="true" />
           <h2 className="mt-4 text-base font-semibold text-ink">Data mode</h2>
           <p className="mt-2 text-sm leading-6 text-ink/70">
-            This build uses mock seed data only. No bank credentials, bank connections,
-            account tokens, or real financial records are stored.
+            This build uses mock seed data only. No bank credentials, real provider
+            connections, access tokens, or real financial records are stored.
           </p>
         </article>
 
@@ -26,8 +42,8 @@ export default function SettingsPage() {
           <dl className="mt-4 space-y-3 text-sm">
             <div className="flex items-center justify-between gap-4">
               <dt className="text-ink/70">Open Banking</dt>
-              <dd className="rounded-full bg-saffron/10 px-3 py-1 font-semibold text-saffron">
-                Off
+              <dd className="rounded-full bg-moss/10 px-3 py-1 font-semibold text-moss">
+                Mock only
               </dd>
             </div>
             <div className="flex items-center justify-between gap-4">
@@ -38,8 +54,8 @@ export default function SettingsPage() {
             </div>
             <div className="flex items-center justify-between gap-4">
               <dt className="text-ink/70">CSV import</dt>
-              <dd className="rounded-full bg-moss/10 px-3 py-1 font-semibold text-moss">
-                Planned
+              <dd className="rounded-full bg-saffron/10 px-3 py-1 font-semibold text-saffron">
+                Not in roadmap
               </dd>
             </div>
           </dl>
