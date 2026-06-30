@@ -4,17 +4,45 @@ import type {
   Account,
   AppNotification,
   BankConnection,
+  Bill,
+  Budget,
+  BudgetPeriod,
+  Category,
+  ManualFinanceItem,
+  NotificationDeliveryAttempt,
+  NotificationPreference,
   ProviderSyncEvent,
+  PushSubscriptionRecord,
   Transaction,
 } from "@/lib/domain";
 import { mergeSyncedTransaction } from "@/lib/bank-providers/provider-mappers";
-import { mockBankConnections } from "@/lib/mock-data";
+import {
+  mockAccounts,
+  mockBankConnections,
+  mockBills,
+  mockBudgetPeriods,
+  mockBudgets,
+  mockCategories,
+  mockManualFinanceItems,
+  mockNotificationPreferences,
+  mockPushSubscriptionRecords,
+  mockTransactionRecords,
+} from "@/lib/mock-data";
 import {
   accountFromRow,
   accountToRow,
   appNotificationToRow,
   bankConnectionFromRow,
   bankConnectionToRow,
+  billFromRow,
+  budgetFromRow,
+  budgetPeriodFromRow,
+  categoryFromRow,
+  manualFinanceItemFromRow,
+  notificationDeliveryAttemptFromRow,
+  notificationDeliveryAttemptToRow,
+  notificationPreferenceFromRow,
+  pushSubscriptionFromRow,
   transactionFromRow,
 } from "@/lib/repositories/mappers";
 import { createAuditEvent, type AuditEventInput } from "@/lib/repositories/audit";
@@ -26,6 +54,140 @@ export type ServiceBankConnectionRecord = {
   userId: string;
   connection: BankConnection;
 };
+
+export type ServiceFinanceSnapshot = {
+  accounts: Account[];
+  bills: Bill[];
+  budgets: Budget[];
+  budgetPeriods: BudgetPeriod[];
+  categories: Category[];
+  manualFinanceItems: ManualFinanceItem[];
+  transactions: Transaction[];
+  bankConnections: BankConnection[];
+};
+
+export async function getServiceActiveUserIds(): Promise<string[]> {
+  const supabase = createSupabaseServiceRoleClient();
+
+  if (!supabase) {
+    return [fallbackUserId];
+  }
+
+  const { data, error } = await supabase.from("profiles").select("user_id");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map((row) => row.user_id);
+}
+
+export async function getServiceFinanceSnapshot(
+  userId: string,
+): Promise<ServiceFinanceSnapshot> {
+  const supabase = createSupabaseServiceRoleClient();
+
+  if (!supabase) {
+    return {
+      accounts: mockAccounts,
+      bills: mockBills,
+      budgets: mockBudgets,
+      budgetPeriods: mockBudgetPeriods,
+      categories: mockCategories,
+      manualFinanceItems: mockManualFinanceItems,
+      transactions: mockTransactionRecords,
+      bankConnections: mockBankConnections,
+    };
+  }
+
+  const [
+    accounts,
+    bills,
+    budgets,
+    budgetPeriods,
+    categories,
+    manualFinanceItems,
+    transactions,
+    bankConnections,
+  ] = await Promise.all([
+    supabase.from("accounts").select("*").eq("user_id", userId),
+    supabase.from("bills").select("*").eq("user_id", userId),
+    supabase.from("budgets").select("*").eq("user_id", userId),
+    supabase.from("budget_periods").select("*").eq("user_id", userId),
+    supabase.from("categories").select("*").eq("user_id", userId),
+    supabase.from("manual_finance_items").select("*").eq("user_id", userId),
+    supabase.from("transactions").select("*").eq("user_id", userId),
+    supabase.from("bank_connections").select("*").eq("user_id", userId),
+  ]);
+  const firstError = [
+    accounts.error,
+    bills.error,
+    budgets.error,
+    budgetPeriods.error,
+    categories.error,
+    manualFinanceItems.error,
+    transactions.error,
+    bankConnections.error,
+  ].find(Boolean);
+
+  if (firstError) {
+    throw new Error(firstError.message);
+  }
+
+  return {
+    accounts: (accounts.data ?? []).map(accountFromRow),
+    bills: (bills.data ?? []).map(billFromRow),
+    budgets: (budgets.data ?? []).map(budgetFromRow),
+    budgetPeriods: (budgetPeriods.data ?? []).map(budgetPeriodFromRow),
+    categories: (categories.data ?? []).map(categoryFromRow),
+    manualFinanceItems: (manualFinanceItems.data ?? []).map(manualFinanceItemFromRow),
+    transactions: (transactions.data ?? []).map(transactionFromRow),
+    bankConnections: (bankConnections.data ?? []).map(bankConnectionFromRow),
+  };
+}
+
+export async function getServiceNotificationPreferences(
+  userId: string,
+): Promise<NotificationPreference[]> {
+  const supabase = createSupabaseServiceRoleClient();
+
+  if (!supabase) {
+    return mockNotificationPreferences;
+  }
+
+  const { data, error } = await supabase
+    .from("notification_preferences")
+    .select("*")
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(notificationPreferenceFromRow);
+}
+
+export async function getServicePushSubscriptions(
+  userId: string,
+): Promise<PushSubscriptionRecord[]> {
+  const supabase = createSupabaseServiceRoleClient();
+
+  if (!supabase) {
+    return mockPushSubscriptionRecords.filter((record) => record.status === "active");
+  }
+
+  const { data, error } = await supabase
+    .from("push_subscriptions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "active");
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.map(pushSubscriptionFromRow);
+}
 
 export async function getServiceBankConnectionById(
   id: string,
@@ -265,7 +427,7 @@ export async function createServiceNotification(
 
   const { data, error } = await supabase
     .from("app_notifications")
-    .insert(appNotificationToRow(notification, notification.userId))
+    .upsert(appNotificationToRow(notification, notification.userId), { onConflict: "id" })
     .select()
     .single();
 
@@ -292,4 +454,38 @@ export async function createServiceNotification(
     createdAt: data.created_at,
     updatedAt: data.updated_at,
   };
+}
+
+export async function recordServiceNotificationDeliveryAttempt(
+  attempt: NotificationDeliveryAttempt,
+): Promise<NotificationDeliveryAttempt> {
+  const supabase = createSupabaseServiceRoleClient();
+
+  if (!supabase) {
+    return attempt;
+  }
+
+  const { data, error } = await supabase
+    .from("notification_delivery_attempts")
+    .insert(notificationDeliveryAttemptToRow(attempt, attempt.userId))
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await recordServiceAuditEvent({
+    userId: attempt.userId,
+    eventType: "notification_delivery_attempt_created",
+    entity: "notification_delivery_attempts",
+    entityId: attempt.id,
+    metadata: {
+      notificationId: attempt.notificationId,
+      status: attempt.status,
+      channel: attempt.channel,
+    },
+  });
+
+  return notificationDeliveryAttemptFromRow(data);
 }

@@ -41,16 +41,29 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  const payload = event.data?.json?.() ?? {};
-  const title = payload.title ?? "Personal Finance HQ";
-  const body = payload.body ?? "Finance notification";
+  let payload = {};
+
+  try {
+    payload = event.data?.json?.() ?? {};
+  } catch {
+    payload = {};
+  }
+
+  const title = payload.title ?? "New finance alert";
+  const body = payload.body ?? "Open Personal Finance HQ to review it.";
+  const url =
+    typeof payload.url === "string" && payload.url.startsWith("/") && !payload.url.startsWith("//")
+      ? payload.url
+      : "/notifications";
 
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
       tag: payload.tag ?? "personal-finance-hq",
+      badge: "/icons/icon-192.svg",
+      icon: "/icons/icon-192.svg",
       data: {
-        url: payload.url ?? "/notifications",
+        url,
       },
     }),
   );
@@ -62,13 +75,16 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      const matchingClient = clients.find((client) => client.url.endsWith(url));
+      const matchingClient = clients.find((client) => {
+        const clientUrl = new URL(client.url);
+        return clientUrl.pathname === url;
+      });
 
       if (matchingClient) {
         return matchingClient.focus();
       }
 
-      return self.clients.openWindow(url);
+      return self.clients.openWindow(url || "/notifications");
     }),
   );
 });

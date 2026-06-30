@@ -680,6 +680,7 @@ export type NotificationChannel = "in_app" | "web_push" | "email_placeholder";
 export type NotificationSeverity = "info" | "warning" | "urgent";
 
 export type NotificationStatus = "unread" | "read" | "dismissed";
+export type NotificationDeliveryStatus = "pending" | "delivered" | "failed" | "skipped";
 
 export type NotificationPreference = {
   id: string;
@@ -732,12 +733,29 @@ export type PushSubscriptionRecord = {
   id: string;
   userId: string;
   endpointHash: string;
+  endpoint?: string;
+  p256dh?: string;
+  auth?: string;
   browser: string;
   permission: NotificationPermission | "unsupported";
   status: "placeholder" | "active" | "revoked";
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type NotificationDeliveryAttempt = {
+  id: string;
+  userId: string;
+  notificationId: string;
+  channel: NotificationChannel;
+  status: NotificationDeliveryStatus;
+  attemptedAt: string;
+  deliveredAt: string | null;
+  failedAt: string | null;
+  failureReason: string | null;
+  providerResponseCode: number | null;
+  createdAt: string;
 };
 
 export type ManualFinanceItemType =

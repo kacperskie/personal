@@ -15,6 +15,7 @@ import type {
   ManualFinanceDirection,
   ManualFinanceItemType,
   NotificationChannel,
+  NotificationDeliveryStatus,
   NotificationSeverity,
   NotificationStatus,
   NotificationType,
@@ -397,7 +398,11 @@ export type Database = {
           id: string;
           user_id: string;
           endpoint_hash: string;
+          endpoint: string | null;
+          p256dh: string | null;
+          auth: string | null;
           browser: string;
+          user_agent: string | null;
           permission: NotificationPermission | "unsupported";
           status: "placeholder" | "active" | "revoked";
           last_seen_at: string | null;
@@ -410,6 +415,30 @@ export type Database = {
           browser: string;
         };
         Update: Partial<Database["public"]["Tables"]["push_subscriptions"]["Row"]>;
+        Relationships: [];
+      };
+      notification_delivery_attempts: {
+        Row: {
+          id: string;
+          user_id: string;
+          notification_id: string;
+          channel: NotificationChannel;
+          status: NotificationDeliveryStatus;
+          attempted_at: string;
+          delivered_at: string | null;
+          failed_at: string | null;
+          failure_reason: string | null;
+          provider_response_code: number | null;
+          created_at: string;
+        };
+        Insert: Partial<Database["public"]["Tables"]["notification_delivery_attempts"]["Row"]> & {
+          user_id: string;
+          notification_id: string;
+          channel: NotificationChannel;
+          status: NotificationDeliveryStatus;
+          attempted_at: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["notification_delivery_attempts"]["Row"]>;
         Relationships: [];
       };
       provider_sync_events: {

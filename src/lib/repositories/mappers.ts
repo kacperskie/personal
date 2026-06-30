@@ -10,6 +10,7 @@ import type {
   Debt,
   ManualFinanceItem,
   MerchantRule,
+  NotificationDeliveryAttempt,
   NotificationPreference,
   PushSubscriptionRecord,
   RecurringPaymentCandidate,
@@ -41,6 +42,8 @@ type NotificationPreferenceRow =
   Database["public"]["Tables"]["notification_preferences"]["Row"];
 type AppNotificationRow = Database["public"]["Tables"]["app_notifications"]["Row"];
 type PushSubscriptionRow = Database["public"]["Tables"]["push_subscriptions"]["Row"];
+type NotificationDeliveryAttemptRow =
+  Database["public"]["Tables"]["notification_delivery_attempts"]["Row"];
 type MerchantRuleRow = Database["public"]["Tables"]["merchant_rules"]["Row"];
 type TransactionEnrichmentRow =
   Database["public"]["Tables"]["transaction_enrichments"]["Row"];
@@ -737,11 +740,51 @@ export function pushSubscriptionFromRow(row: PushSubscriptionRow): PushSubscript
     id: row.id,
     userId: row.user_id,
     endpointHash: row.endpoint_hash,
+    endpoint: row.endpoint ?? undefined,
+    p256dh: row.p256dh ?? undefined,
+    auth: row.auth ?? undefined,
     browser: row.browser,
     permission: row.permission,
     status: row.status,
     lastSeenAt: row.last_seen_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function notificationDeliveryAttemptFromRow(
+  row: NotificationDeliveryAttemptRow,
+): NotificationDeliveryAttempt {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    notificationId: row.notification_id,
+    channel: row.channel,
+    status: row.status,
+    attemptedAt: row.attempted_at,
+    deliveredAt: row.delivered_at,
+    failedAt: row.failed_at,
+    failureReason: row.failure_reason,
+    providerResponseCode: row.provider_response_code,
+    createdAt: row.created_at,
+  };
+}
+
+export function notificationDeliveryAttemptToRow(
+  attempt: NotificationDeliveryAttempt,
+  userId: string,
+): NotificationDeliveryAttemptRow {
+  return {
+    id: attempt.id,
+    user_id: userId,
+    notification_id: attempt.notificationId,
+    channel: attempt.channel,
+    status: attempt.status,
+    attempted_at: attempt.attemptedAt,
+    delivered_at: attempt.deliveredAt,
+    failed_at: attempt.failedAt,
+    failure_reason: attempt.failureReason,
+    provider_response_code: attempt.providerResponseCode,
+    created_at: attempt.createdAt,
   };
 }

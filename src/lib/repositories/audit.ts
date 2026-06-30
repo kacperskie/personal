@@ -31,6 +31,13 @@ export type AuditEventType =
   | "push_notification_permission_requested"
   | "push_subscription_placeholder_saved"
   | "push_subscription_placeholder_deleted"
+  | "push_subscription_saved"
+  | "push_subscription_deleted"
+  | "push_test_requested"
+  | "notification_delivery_attempt_created"
+  | "scheduled_notifications_started"
+  | "scheduled_notifications_completed"
+  | "scheduled_notification_duplicate_suppressed"
   | "ai_money_coach_requested"
   | "ai_money_coach_failed"
   | "ai_insight_created";

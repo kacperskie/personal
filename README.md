@@ -2,11 +2,11 @@
 
 Private UK-focused personal finance dashboard with an AI money coach.
 
-The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 9 adds the AI Money Coach using a server-only OpenAI Responses API integration, grounded in deterministic finance context with redaction, structured responses, audit records, and fallback summaries.
+The product goal is to help the user understand spending, budgets, bills, subscriptions, savings goals, cashflow, debt, and net worth. Phase 10 adds scheduled alert generation and VAPID Web Push delivery for the PWA, with iPhone-safe notification behaviour and privacy-safe external copy.
 
 ## Current Phase
 
-Phase 9: AI Money Coach.
+Phase 10: scheduled alerts and Web Push delivery.
 
 Implemented locally:
 
@@ -37,6 +37,12 @@ Implemented locally:
 - Authenticated `POST /api/ai/money-coach` route that builds finance context server-side, calls OpenAI only when configured, stores redacted AI insight metadata, creates audit events, and returns structured responses.
 - AI Coach page with mode selector, chat-style question box, suggested prompts, response cards, key numbers, assumptions, data used, loading states, and error fallback.
 - Dashboard money coach summary card with deterministic fallback plus "Ask why" and "View details" links.
+- Server-only Web Push infrastructure under `src/lib/notifications` for VAPID config, sensitive push subscription storage, delivery attempts, privacy-safe push payloads, and scheduled alert generation.
+- Authenticated push routes at `POST /api/notifications/push/subscribe`, `POST /api/notifications/push/unsubscribe`, and `POST /api/notifications/push/test`.
+- Scheduled alert route at `GET /api/notifications/scheduled`, protected by `CRON_SECRET`.
+- Service worker push handling for privacy-safe notification text and safe `/notifications` deep-link fallback.
+- Settings notification UX for iPhone Home Screen PWA guidance, permission status, push status, enable/disable, and test notification.
+- Vercel Cron configuration in `vercel.json` for scheduled notifications and scheduled bank sync.
 - Account-purpose default suggestions for American Express, Nationwide, and Revolut account patterns.
 - Supabase browser, server, and service-role client helpers.
 - Supabase-compatible sign-in page with email/password and magic-link flow.
@@ -99,6 +105,7 @@ supabase/migrations/20260703000000_phase7_moneyhub_sync.sql
 supabase/migrations/20260704000000_phase8a_event_driven_sync.sql
 supabase/migrations/20260705000000_phase8b_transaction_intelligence.sql
 supabase/migrations/20260706000000_phase9_ai_money_coach.sql
+supabase/migrations/20260707000000_phase10_web_push_notifications.sql
 ```
 
 When Supabase variables are missing, the app intentionally falls back to mock/local data so local UI and calculation work can continue without a database.
@@ -127,6 +134,11 @@ OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4.1-mini
 OPENAI_ORG_ID=
 OPENAI_PROJECT_ID=
+WEB_PUSH_VAPID_PUBLIC_KEY=
+WEB_PUSH_VAPID_PRIVATE_KEY=
+WEB_PUSH_SUBJECT=mailto:admin@example.com
+NOTIFICATION_DELIVERY_ENABLED=false
+AI_SCHEDULED_REVIEWS_ENABLED=false
 ```
 
 Moneyhub sandbox setup requires a Moneyhub sandbox/API client, a registered redirect URL matching `MONEYHUB_REDIRECT_URI`, any required signing key material or key reference for the client configuration, webhook configuration in the provider admin portal, and Supabase configured for persistent sync testing.
@@ -479,7 +491,90 @@ Notification text shown outside the authenticated app is privacy-safe by default
 
 Detailed amounts, bank names, bill names, and account names should only appear inside the authenticated app.
 
-Real push notification delivery remains future work. It will require explicit permission, secure push subscription storage, endpoint redaction, VAPID/provider setup, and a security review.
+Real push notification delivery is available when VAPID keys and `NOTIFICATION_DELIVERY_ENABLED=true` are configured. It requires explicit browser permission, secure push subscription storage, endpoint redaction, privacy-safe payloads, and ongoing security review.
+
+## Web Push And Scheduled Alerts
+
+Phase 10 enables real Web Push delivery when explicitly configured.
+
+Server-only modules:
+
+- `src/lib/notifications/web-push.ts`
+- `src/lib/notifications/push-subscriptions.ts`
+- `src/lib/notifications/notification-delivery.ts`
+- `src/lib/notifications/scheduled-alerts.ts`
+
+VAPID setup:
+
+```bash
+WEB_PUSH_VAPID_PUBLIC_KEY=
+WEB_PUSH_VAPID_PRIVATE_KEY=
+WEB_PUSH_SUBJECT=mailto:admin@example.com
+NOTIFICATION_DELIVERY_ENABLED=false
+```
+
+The VAPID private key is server-only. The browser only receives the public key needed by `PushManager.subscribe()`.
+
+iPhone PWA behaviour:
+
+- Open Personal Finance HQ in Safari.
+- Use Share -> Add to Home Screen.
+- Open the app from the Home Screen icon.
+- Tap Enable Notifications in Settings.
+- iPhone Web Push requires the installed Home Screen PWA. Browser-tab Safari alone is not enough.
+
+Push subscription storage:
+
+- Push subscriptions are sensitive.
+- Endpoint, `p256dh`, and `auth` are stored server-side only.
+- UI responses expose status and endpoint hash only.
+- Push payloads use `privacySafeTitle` and `privacySafeBody`.
+- Detailed amounts, merchants, bank names, account names, and account references stay inside the authenticated app.
+
+Scheduled alert architecture:
+
+- `GET /api/notifications/scheduled` is protected by `CRON_SECRET`.
+- It can be called by Vercel Cron, Supabase Cron, manual admin/dev curl, or a future queue worker.
+- It generates deterministic alerts for due bills, subscription/manual recurring items, budget thresholds, low safe-to-spend, projected bills-account shortfall, consent renewal, sync failure, manual review due, payday planning, and monthly/weekly AI review hooks.
+- Scheduled AI reviews are disabled by default with `AI_SCHEDULED_REVIEWS_ENABLED=false`.
+- When enabled, scheduled AI review hooks use deterministic fallback unless OpenAI is configured and explicitly enabled in the relevant code path.
+
+Dedupe rules:
+
+- Notification IDs include user-relevant type, entity, alert date/window, and severity.
+- Repeated scheduled runs upsert the same notification ID instead of creating duplicates.
+- Budget threshold and bill due alerts remain stable within the same alert window.
+
+Preference and quiet-hours rules:
+
+- In-app notifications respect notification type enablement.
+- Web Push delivery requires the `web_push` channel.
+- Push delivery is skipped during quiet hours.
+- Urgent alerts can still be created in-app during quiet hours; external push copy remains generic.
+
+Delivery logging:
+
+- `notification_delivery_attempts` records channel, status, attempted time, delivery/failure time, failure reason, and provider response code.
+- Delivery logs are user-owned and protected by RLS.
+
+Vercel Cron:
+
+`vercel.json` includes:
+
+- `/api/notifications/scheduled`
+- `/api/bank-connections/scheduled-sync`
+
+Supabase Cron option:
+
+Call the same HTTP routes with either `Authorization: Bearer <CRON_SECRET>` or `x-cron-secret: <CRON_SECRET>`.
+
+Troubleshooting:
+
+- Push unavailable on iPhone: confirm the app was launched from the Home Screen PWA.
+- Permission denied: ask the browser/user to re-enable notifications; do not request permission automatically.
+- Delivery skipped: check `NOTIFICATION_DELIVERY_ENABLED`, VAPID keys, quiet hours, notification channels, and active push subscriptions.
+- Cron rejected: check `CRON_SECRET`.
+- Duplicate alerts: check notification ID windows and source entity IDs before changing dedupe rules.
 
 ## Provider Abstraction
 
@@ -500,7 +595,7 @@ The adapter interface supports:
 - `refreshConnection()`
 - `revokeConnection()`
 
-Phase 8B keeps `mockOpenBankingProvider` available, uses the Moneyhub sandbox adapter behind the provider abstraction, and builds transaction intelligence on top of synced or mock transaction data. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
+Phase 10 keeps `mockOpenBankingProvider` available, uses the Moneyhub sandbox adapter behind the provider abstraction, and builds transaction intelligence plus scheduled notifications on top of synced or mock transaction data. Real provider integration requires a provider account, sandbox credentials, OAuth redirect URLs, webhook configuration, secure token storage, and a separate security review before any live financial data is connected.
 
 ## Open Banking Token Boundary
 
@@ -530,6 +625,15 @@ MONEYHUB_KEY_ID=
 OPEN_BANKING_PROVIDER_PAYLOAD_DEBUG=false
 PROVIDER_PAYLOAD_DEBUG_DIR=.debug/provider-payloads
 CRON_SECRET=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_ORG_ID=
+OPENAI_PROJECT_ID=
+WEB_PUSH_VAPID_PUBLIC_KEY=
+WEB_PUSH_VAPID_PRIVATE_KEY=
+WEB_PUSH_SUBJECT=mailto:admin@example.com
+NOTIFICATION_DELIVERY_ENABLED=false
+AI_SCHEDULED_REVIEWS_ENABLED=false
 ```
 
 Do not commit real credentials, client secrets, access tokens, refresh tokens, consent artefacts, or real financial data.
@@ -593,6 +697,7 @@ Core domain types:
 - `NotificationRule`
 - `AppNotification`
 - `PushSubscriptionRecord`
+- `NotificationDeliveryAttempt`
 - `MerchantRule`
 - `TransactionEnrichment`
 - `RecurringPaymentCandidate`

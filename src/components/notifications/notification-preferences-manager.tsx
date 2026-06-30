@@ -1,12 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Bell, BellOff, Save, ShieldCheck } from "lucide-react";
 import {
-  auditPushPermissionRequestedAction,
-  deletePushSubscriptionPlaceholderAction,
   saveNotificationPreferencesAction,
-  savePushSubscriptionPlaceholderAction,
 } from "@/app/settings/actions";
 import type { NotificationChannel, NotificationPreference } from "@/lib/domain";
 
@@ -61,13 +58,38 @@ function updateChannel(
 
 export function NotificationPreferencesManager({
   preferences,
+  webPushPublicKey,
+  webPushConfigured,
+  deliveryEnabled,
 }: {
   preferences: NotificationPreference[];
+  webPushPublicKey: string | null;
+  webPushConfigured: boolean;
+  deliveryEnabled: boolean;
 }) {
   const [drafts, setDrafts] = useState(preferences);
   const [message, setMessage] = useState<string | null>(null);
+  const [permissionStatus, setPermissionStatus] = useState<string>(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      return "unsupported";
+    }
+
+    return Notification.permission;
+  });
+  const [pushEnabled, setPushEnabled] = useState(false);
   const [isPending, startTransition] = useTransition();
   const shared = drafts[0];
+
+  useEffect(() => {
+    if (!("Notification" in window)) {
+      return;
+    }
+
+    void navigator.serviceWorker?.ready
+      .then((registration) => registration.pushManager.getSubscription())
+      .then((subscription) => setPushEnabled(Boolean(subscription)))
+      .catch(() => setPushEnabled(false));
+  }, []);
 
   function updatePreference(id: string, changes: Partial<NotificationPreference>) {
     setDrafts((current) =>
@@ -105,27 +127,97 @@ export function NotificationPreferencesManager({
     setMessage(null);
     startTransition(() => {
       void (async () => {
-        const permission =
-          "Notification" in window ? await Notification.requestPermission() : "unsupported";
-        await auditPushPermissionRequestedAction(permission);
-        await savePushSubscriptionPlaceholderAction({
-          permission,
-          browser: navigator.userAgent,
+        if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+          setPermissionStatus("unsupported");
+          setMessage("This browser does not support Web Push notifications.");
+          return;
+        }
+
+        if (!webPushPublicKey) {
+          setMessage("Web Push is not configured. Add VAPID keys on the server first.");
+          return;
+        }
+
+        const permission = await Notification.requestPermission();
+        setPermissionStatus(permission);
+
+        if (permission !== "granted") {
+          setMessage("Notification permission was not granted. In-app notifications remain enabled.");
+          return;
+        }
+
+        const registration = await navigator.serviceWorker.ready;
+        const existing = await registration.pushManager.getSubscription();
+        const subscription =
+          existing ??
+          (await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(webPushPublicKey),
+          }));
+
+        const response = await fetch("/api/notifications/push/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subscription: subscription.toJSON(),
+            permission,
+            browser: navigator.userAgent,
+          }),
         });
+
+        if (!response.ok) {
+          throw new Error("Push subscription could not be saved.");
+        }
+
+        setPushEnabled(true);
         setMessage(
-          permission === "granted"
-            ? "Browser notification permission granted. Real push delivery is still disabled."
-            : "Notification permission was not granted. In-app notifications remain enabled.",
+          deliveryEnabled
+            ? "Push notifications are enabled for this device."
+            : "Push subscription saved. Delivery remains disabled until the server flag is enabled.",
         );
       })().catch((error: Error) => setMessage(error.message));
     });
   }
 
-  function deletePlaceholder() {
+  function unsubscribePush() {
     setMessage(null);
     startTransition(() => {
-      void deletePushSubscriptionPlaceholderAction()
-        .then(() => setMessage("Push placeholder removed."))
+      void (async () => {
+        const registration = await navigator.serviceWorker.ready;
+        const subscription = await registration.pushManager.getSubscription();
+
+        if (!subscription) {
+          setPushEnabled(false);
+          setMessage("No push subscription is active on this device.");
+          return;
+        }
+
+        await fetch("/api/notifications/push/unsubscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        });
+        await subscription.unsubscribe();
+        setPushEnabled(false);
+        setMessage("Push notifications are disabled on this device.");
+      })()
+        .catch((error: Error) => setMessage(error.message));
+    });
+  }
+
+  function sendTestNotification() {
+    setMessage(null);
+    startTransition(() => {
+      void fetch("/api/notifications/push/test", { method: "POST" })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("Test notification could not be sent.");
+          }
+
+          const payload = (await response.json()) as { attempts?: Array<{ status: string }> };
+          const status = payload.attempts?.map((attempt) => attempt.status).join(", ") ?? "created";
+          setMessage(`Test notification processed: ${status}.`);
+        })
         .catch((error: Error) => setMessage(error.message));
     });
   }
@@ -136,11 +228,36 @@ export function NotificationPreferencesManager({
         <div>
           <h2 className="text-base font-semibold text-ink">Notification preferences</h2>
           <p className="mt-2 text-sm leading-6 text-ink/70">
-            In-app notifications are available now. Web push is a placeholder and only asks
-            for permission after you tap the enable button.
+            In-app notifications are available now. Web Push works on iPhone only when
+            Personal Finance HQ is installed from Safari using Add to Home Screen.
           </p>
         </div>
         <Bell className="h-5 w-5 text-teal" aria-hidden="true" />
+      </div>
+
+      <div className="mt-5 grid gap-3 rounded-lg border border-line bg-paper p-4 text-sm text-ink/70 md:grid-cols-4">
+        <div>
+          <p className="font-semibold text-ink">iPhone requirement</p>
+          <p className="mt-1">Install to Home Screen before enabling push on iPhone.</p>
+        </div>
+        <div>
+          <p className="font-semibold text-ink">Permission</p>
+          <p className="mt-1">{permissionStatus}</p>
+        </div>
+        <div>
+          <p className="font-semibold text-ink">Push status</p>
+          <p className="mt-1">{pushEnabled ? "Enabled on this device" : "Disabled"}</p>
+        </div>
+        <div>
+          <p className="font-semibold text-ink">Server delivery</p>
+          <p className="mt-1">
+            {webPushConfigured
+              ? deliveryEnabled
+                ? "Enabled"
+                : "Configured, disabled"
+              : "Missing VAPID public key"}
+          </p>
+        </div>
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -268,15 +385,37 @@ export function NotificationPreferencesManager({
         </button>
         <button
           type="button"
-          onClick={deletePlaceholder}
+          onClick={sendTestNotification}
+          disabled={isPending || !pushEnabled}
+          className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+        >
+          <Bell className="h-4 w-4" aria-hidden="true" />
+          Test notification
+        </button>
+        <button
+          type="button"
+          onClick={unsubscribePush}
           disabled={isPending}
           className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-ink/70 disabled:opacity-50"
         >
           <BellOff className="h-4 w-4" aria-hidden="true" />
-          Remove push placeholder
+          Disable push
         </button>
       </div>
       {message ? <p className="mt-3 text-sm text-ink/70">{message}</p> : null}
     </section>
   );
+}
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = `${base64String}${padding}`.replaceAll("-", "+").replaceAll("_", "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let index = 0; index < rawData.length; index += 1) {
+    outputArray[index] = rawData.charCodeAt(index);
+  }
+
+  return outputArray;
 }

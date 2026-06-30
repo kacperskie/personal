@@ -4,6 +4,7 @@ import { NotificationPreferencesManager } from "@/components/notifications/notif
 import { PageHeader } from "@/components/page-header";
 import { InstallGuidance } from "@/components/pwa/install-guidance";
 import { SignOutButton } from "@/components/sign-out-button";
+import { getClientWebPushConfig } from "@/lib/notifications/web-push";
 import { getNotificationPreferences } from "@/lib/repositories/notification-repository";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 
@@ -12,6 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   const supabaseConfigured = isSupabaseConfigured();
   const notificationPreferences = await getNotificationPreferences();
+  const webPush = getClientWebPushConfig();
 
   return (
     <div className="space-y-6">
@@ -74,7 +76,12 @@ export default async function SettingsPage() {
         </article>
       </section>
 
-      <NotificationPreferencesManager preferences={notificationPreferences} />
+      <NotificationPreferencesManager
+        preferences={notificationPreferences}
+        webPushPublicKey={webPush.publicKey}
+        webPushConfigured={webPush.configured}
+        deliveryEnabled={webPush.deliveryEnabled}
+      />
 
       <InstallGuidance />
 

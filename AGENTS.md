@@ -95,6 +95,16 @@ The AI should avoid regulated investment, pension transfer, mortgage, tax filing
 - Service worker code may provide offline fallback, notification-click handling, and placeholder push handling only.
 - Do not add real push notification delivery until explicit permission, secure subscription storage, endpoint redaction, VAPID/provider setup, and security review are in place.
 - Do not request browser notification permission automatically; only request it after the user taps an Enable Notifications control.
+- Real Web Push delivery uses VAPID and must stay server-side for the private key. Never expose `WEB_PUSH_VAPID_PRIVATE_KEY`.
+- Only `WEB_PUSH_VAPID_PUBLIC_KEY` may be exposed to browser code.
+- Push subscription endpoints, `p256dh`, and `auth` keys are sensitive and must not be displayed in UI or logs.
+- Web Push payloads must use privacy-safe notification copy only. Do not include amounts, merchants, bank names, account names, account numbers, provider IDs, or detailed financial facts.
+- iPhone Web Push requires the Safari Add to Home Screen PWA; keep settings copy explicit about this.
+- Scheduled notification routes must require `CRON_SECRET`.
+- Scheduled alerts must be deterministic, idempotent, and deduped by user, type, source entity, alert window, and severity.
+- Scheduled delivery must respect notification preferences, channels, quiet hours, and delivery feature flags.
+- Scheduled AI reviews must remain disabled by default with `AI_SCHEDULED_REVIEWS_ENABLED=false`.
+- Record delivery attempts for successful, failed, and skipped Web Push sends.
 - Keep notification copy shown outside the app privacy-safe by default. Avoid amounts, bank names, account names, and detailed financial facts in browser notification text.
 - Transaction notification copy shown outside the app must stay generic, such as "New transaction detected", "Transaction updated", "Potential duplicate payment", or "Account connection needs attention".
 - Phase 8B intelligence notification copy shown outside the app must stay generic, such as "Bill detected", "Subscription detected", "Subscription price changed", "Expected payment needs review", "Unusual spending detected", or "Transaction needs review".
