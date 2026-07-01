@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -30,6 +32,7 @@ import {
 } from "../src/lib/bank-providers/provider-mappers";
 import {
   getProviderToken,
+  getProviderTokenForSync,
   toClientSafeTokenRecord,
 } from "../src/lib/bank-providers/token-store";
 
@@ -388,6 +391,46 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(JSON.stringify(clientSafeToken)).not.toContain(token?.tokenReference ?? "");
   });
 
+  it("does not return a connected callback result when token storage cannot encrypt", async () => {
+    const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
+    const start = await provider.createConnection({
+      userId: "user_token_fail",
+      institutionId: "truelayer_sandbox",
+      institutionName: "TrueLayer sandbox",
+    });
+
+    await expect(
+      provider.handleCallback({
+        code: "sandbox-code",
+        state: start.state,
+        userId: "user_token_fail",
+      }),
+    ).rejects.toMatchObject({
+      code: "provider_callback_failed",
+      userMessage: "Open Banking token encryption is not configured.",
+    });
+  });
+
+  it("uses the same connectionId for BankConnection and providerToken", async () => {
+    vi.stubEnv("TOKEN_ENCRYPTION_KEY", "x".repeat(32));
+    const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
+    const start = await provider.createConnection({
+      userId: "user_linked",
+      institutionId: "truelayer_sandbox",
+      institutionName: "TrueLayer sandbox",
+    });
+    const callback = await provider.handleCallback({
+      code: "sandbox-code",
+      state: start.state,
+      userId: "user_linked",
+    });
+    const preflight = await getProviderTokenForSync("user_linked", callback.connection.id);
+
+    expect(preflight.ok).toBe(true);
+    if (!preflight.ok) return;
+    expect(preflight.record.connectionId).toBe(callback.connection.id);
+  });
+
   it("syncs TrueLayer mocked accounts and transactions through the generic workflow", async () => {
     const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
     const accounts = new Map<string, Account>();
@@ -529,5 +572,244 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(html).not.toContain("conn_dead_pending");
     expect(html).toContain("Historical TrueLayer");
     expect(html).toContain("Synced TrueLayer");
+  });
+
+  it("shows reconnect required for old connected records without usable tokens", () => {
+    const html = renderToStaticMarkup(
+      <ConnectedAccountsManager
+        connections={[
+          {
+            ...baseConnection,
+            id: "conn_connected_without_token",
+            status: "connected",
+            consentStatus: "active",
+            institutionName: "Broken TrueLayer",
+          },
+        ]}
+        tokenDiagnostics={{
+          conn_connected_without_token: {
+            connectionId: "conn_connected_without_token",
+            tokenRecordPresent: false,
+            tokenDecryptable: "not_tested",
+            tokenLinkedToConnection: "no",
+            syncEligible: "no",
+            reasonCode: "token_record_missing",
+          },
+        }}
+        providerState={{
+          provider: "truelayer",
+          configured: true,
+          safeMessage: "TrueLayer configured.",
+        }}
+      />,
+    );
+
+    expect(html).toContain("Broken TrueLayer");
+    expect(html).toContain("Reconnect required");
+    expect(html).toContain("Token record present");
+    expect(html).toContain("No");
+    expect(html).toContain("disabled");
+  });
+
+  it("keeps provider token Firestore access scoped to the signed-in user path", () => {
+    const tokenStoreSource = fs.readFileSync(
+      path.resolve("src/lib/bank-providers/token-store.ts"),
+      "utf8",
+    );
+
+    expect(tokenStoreSource).toContain("users/${userId}/providerTokens");
+    expect(tokenStoreSource).not.toContain("providerTokens/${userId}");
+  });
+
+  it("sync route returns token_record_missing without calling TrueLayer", async () => {
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_missing_token" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async () => ({
+        ...baseConnection,
+        id: "conn_missing_token",
+        status: "connected",
+        consentStatus: "active",
+      }),
+      recordAuditEvent: async (event: unknown) => event,
+      recordProviderSyncEvent: async (event: unknown) => event,
+      updateBankConnectionStatus: async (connection: unknown) => connection,
+      upsertAccount: async (account: unknown) => account,
+      upsertTransaction: async (transaction: unknown) => transaction,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      getProviderTokenForSync: async () => ({
+        ok: false,
+        reason: "token_record_missing",
+        status: 409,
+        message: "Reconnect required before this bank connection can sync.",
+        diagnostics: {
+          connectionId: "conn_missing_token",
+          tokenRecordPresent: false,
+          tokenDecryptable: "not_tested",
+          tokenLinkedToConnection: "no",
+          syncEligible: "no",
+          reasonCode: "token_record_missing",
+        },
+      }),
+    }));
+    const getProviderAdapter = vi.fn();
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({ getProviderAdapter }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/sync/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_missing_token/sync", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: "conn_missing_token" }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.reason).toBe("token_record_missing");
+    expect(getProviderAdapter).not.toHaveBeenCalled();
+  });
+
+  it("sync route rejects token connection mismatches before provider calls", async () => {
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_mismatch" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async () => ({
+        ...baseConnection,
+        id: "conn_expected",
+        status: "connected",
+        consentStatus: "active",
+      }),
+      recordAuditEvent: async (event: unknown) => event,
+      recordProviderSyncEvent: async (event: unknown) => event,
+      updateBankConnectionStatus: async (connection: unknown) => connection,
+      upsertAccount: async (account: unknown) => account,
+      upsertTransaction: async (transaction: unknown) => transaction,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      getProviderTokenForSync: async () => ({
+        ok: false,
+        reason: "token_connection_id_mismatch",
+        status: 409,
+        message: "Reconnect required because the stored token is not linked to this connection.",
+        diagnostics: {
+          connectionId: "conn_expected",
+          tokenRecordPresent: true,
+          tokenDecryptable: "yes",
+          tokenLinkedToConnection: "no",
+          syncEligible: "no",
+          reasonCode: "token_connection_id_mismatch",
+        },
+      }),
+    }));
+    const getProviderAdapter = vi.fn();
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({ getProviderAdapter }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/sync/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_expected/sync", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: "conn_expected" }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.reason).toBe("token_connection_id_mismatch");
+    expect(getProviderAdapter).not.toHaveBeenCalled();
+  });
+
+  it("sync route calls provider workflow only after valid token preflight", async () => {
+    const syncBankConnectionMock = vi.fn(async () => ({
+      status: "success",
+      connection: baseConnection,
+      accountsUpserted: 1,
+      transactionsUpserted: 1,
+      syncEvents: [],
+      auditEvents: [],
+      safeMessage: "Connection synced successfully.",
+    }));
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_valid_token" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async () => ({
+        ...baseConnection,
+        id: "conn_valid_token",
+        status: "connected",
+        consentStatus: "active",
+      }),
+      recordAuditEvent: async (event: unknown) => event,
+      recordProviderSyncEvent: async (event: unknown) => event,
+      updateBankConnectionStatus: async (connection: unknown) => connection,
+      upsertAccount: async (account: unknown) => account,
+      upsertTransaction: async (transaction: unknown) => transaction,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      getProviderTokenForSync: async () => ({
+        ok: true,
+        record: {
+          connectionId: "conn_valid_token",
+          provider: "truelayer",
+          tokenReference: "decrypted-access-token",
+          encryptedTokenPayload: "encrypted",
+          providerUserId: "tl_user_001",
+          providerConnectionId: "conn_valid_token",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+          refreshTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+          scopes: ["accounts"],
+          revokedAt: null,
+          createdAt: "2026-06-30T09:00:00.000Z",
+          updatedAt: "2026-06-30T09:00:00.000Z",
+        },
+        diagnostics: {
+          connectionId: "conn_valid_token",
+          tokenRecordPresent: true,
+          tokenDecryptable: "yes",
+          tokenLinkedToConnection: "yes",
+          syncEligible: "yes",
+          reasonCode: null,
+        },
+      }),
+    }));
+    const providerAdapter = { marker: "provider" };
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({
+      getProviderAdapter: () => providerAdapter,
+    }));
+    vi.doMock("@/lib/bank-providers/sync-workflow", () => ({
+      syncBankConnection: syncBankConnectionMock,
+    }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/sync/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_valid_token/sync", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: "conn_valid_token" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(syncBankConnectionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user_valid_token",
+        provider: providerAdapter,
+        providerContext: expect.objectContaining({
+          tokenReference: "decrypted-access-token",
+          providerConnectionId: "conn_valid_token",
+        }),
+      }),
+    );
   });
 });

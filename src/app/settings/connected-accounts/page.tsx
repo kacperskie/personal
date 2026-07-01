@@ -5,6 +5,8 @@ import { StatusPill } from "@/components/status-pill";
 import type { ConnectionLifecycleStatus } from "@/lib/domain";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
 import { getProviderConfiguredState } from "@/lib/bank-providers/provider-config";
+import { getProviderTokenDiagnostics } from "@/lib/bank-providers/token-store";
+import { getFirebaseSessionUser } from "@/lib/firebase/session";
 import { getBankConnections } from "@/lib/repositories/finance-repository";
 
 export const dynamic = "force-dynamic";
@@ -34,15 +36,31 @@ function labelStatus(status: string) {
 }
 
 export default async function ConnectedAccountsPage() {
-  const bankConnections = await getBankConnections();
+  const [bankConnections, user] = await Promise.all([
+    getBankConnections(),
+    getFirebaseSessionUser(),
+  ]);
+  const tokenDiagnosticsEntries = user
+    ? await Promise.all(
+        bankConnections
+          .filter((connection) => connection.provider !== "mock")
+          .map(async (connection) => [
+            connection.id,
+            await getProviderTokenDiagnostics(user.uid, connection.id),
+          ] as const),
+      )
+    : [];
+  const tokenDiagnostics = Object.fromEntries(tokenDiagnosticsEntries);
   const asOfDate = new Date().toISOString().slice(0, 10);
   const connectionsWithDisplayStatus = bankConnections.map((connection) => ({
     ...connection,
+    tokenDiagnostics: tokenDiagnostics[connection.id],
     displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
   }));
   const connectedInstitutions = connectionsWithDisplayStatus.filter(
     (connection) =>
-      connection.displayStatus === "connected" || connection.displayStatus === "syncing",
+      (connection.displayStatus === "connected" || connection.displayStatus === "syncing") &&
+      connection.tokenDiagnostics?.syncEligible !== "no",
   ).length;
   const needsReconsent = connectionsWithDisplayStatus.filter(
     (connection) => connection.displayStatus === "needs_reconsent",
@@ -81,6 +99,7 @@ export default async function ConnectedAccountsPage() {
 
       <ConnectedAccountsManager
         connections={bankConnections}
+        tokenDiagnostics={tokenDiagnostics}
         providerState={getProviderConfiguredState()}
       />
 

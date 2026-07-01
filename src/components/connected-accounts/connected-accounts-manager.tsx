@@ -9,6 +9,7 @@ import type {
   ProviderComparisonCapability,
   TrueLayerSandboxReadiness,
 } from "@/lib/bank-providers/provider-config";
+import type { ProviderTokenDiagnostics } from "@/lib/bank-providers/token-store";
 import { formatDateShort } from "@/lib/format";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
 
@@ -50,11 +51,17 @@ function isSyncDisabled(connection: BankConnection, isPending: boolean, isSyncin
   );
 }
 
+function needsReconnect(diagnostics?: ProviderTokenDiagnostics) {
+  return diagnostics ? diagnostics.syncEligible !== "yes" : false;
+}
+
 export function ConnectedAccountsManager({
   connections,
+  tokenDiagnostics = {},
   providerState,
 }: {
   connections: BankConnection[];
+  tokenDiagnostics?: Record<string, ProviderTokenDiagnostics>;
   providerState: {
     provider: BankProvider;
     configured: boolean;
@@ -78,9 +85,10 @@ export function ConnectedAccountsManager({
         .filter((connection) => !isDeadPreConsentConnection(connection))
         .map((connection) => ({
           ...connection,
+          tokenDiagnostics: tokenDiagnostics[connection.id],
           displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
         })),
-    [connections, asOfDate],
+    [connections, asOfDate, tokenDiagnostics],
   );
   const hiddenFailedConsentAttempts = useMemo(
     () => connections.filter(isDeadPreConsentConnection).length,
@@ -484,6 +492,12 @@ export function ConnectedAccountsManager({
             <article key={connection.id} className="rounded-lg border border-line bg-paper p-4">
               {(() => {
                 const isSyncingConnection = syncingConnectionIds.includes(connection.id);
+                const reconnectRequired = needsReconnect(connection.tokenDiagnostics);
+                const displayLabel = reconnectRequired
+                  ? "Reconnect required"
+                  : isSyncingConnection
+                    ? "syncing"
+                    : labelStatus(connection.displayStatus);
 
                 return (
                   <>
@@ -495,10 +509,21 @@ export function ConnectedAccountsManager({
                   </p>
                 </div>
                 <StatusPill
-                  label={isSyncingConnection ? "syncing" : labelStatus(connection.displayStatus)}
-                  tone={isSyncingConnection ? "neutral" : statusTone[connection.displayStatus]}
+                  label={displayLabel}
+                  tone={
+                    reconnectRequired
+                      ? "warning"
+                      : isSyncingConnection
+                        ? "neutral"
+                        : statusTone[connection.displayStatus]
+                  }
                 />
               </div>
+              {reconnectRequired ? (
+                <div className="mt-4 rounded-lg border border-saffron/30 bg-saffron/10 p-3 text-sm text-ink/75">
+                  Reconnect required before this bank connection can sync.
+                </div>
+              ) : null}
               <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="text-ink/50">Consent</dt>
@@ -536,12 +561,43 @@ export function ConnectedAccountsManager({
                     {connection.errorMessage ?? "No provider-safe error"}
                   </dd>
                 </div>
+                {connection.tokenDiagnostics ? (
+                  <>
+                    <div>
+                      <dt className="text-ink/50">Token record present</dt>
+                      <dd className="mt-1 font-semibold text-ink">
+                        {connection.tokenDiagnostics.tokenRecordPresent ? "Yes" : "No"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-ink/50">Token decryptable</dt>
+                      <dd className="mt-1 font-semibold text-ink">
+                        {connection.tokenDiagnostics.tokenDecryptable}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-ink/50">Token linked</dt>
+                      <dd className="mt-1 font-semibold text-ink">
+                        {connection.tokenDiagnostics.tokenLinkedToConnection}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-ink/50">Sync eligible</dt>
+                      <dd className="mt-1 font-semibold text-ink">
+                        {connection.tokenDiagnostics.syncEligible}
+                      </dd>
+                    </div>
+                  </>
+                ) : null}
               </dl>
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => syncConnection(connection.id)}
-                  disabled={isSyncDisabled(connection, isPending, isSyncingConnection)}
+                  disabled={
+                    reconnectRequired ||
+                    isSyncDisabled(connection, isPending, isSyncingConnection)
+                  }
                   className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   <RefreshCw className={isSyncingConnection ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />

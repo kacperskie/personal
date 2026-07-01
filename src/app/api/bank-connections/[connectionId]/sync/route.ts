@@ -3,7 +3,11 @@ import { createProviderNotification } from "@/lib/bank-providers/provider-notifi
 import { createSafeErrorPayload, ProviderSafeError } from "@/lib/bank-providers/provider-errors";
 import { getProviderAdapter } from "@/lib/bank-providers/provider-service";
 import { syncBankConnection } from "@/lib/bank-providers/sync-workflow";
-import { getProviderToken } from "@/lib/bank-providers/token-store";
+import {
+  getProviderTokenForSync,
+  type ProviderTokenSyncReason,
+} from "@/lib/bank-providers/token-store";
+import { logServerEvent } from "@/lib/observability/server-logger";
 import {
   getBankConnectionById,
   recordAuditEvent,
@@ -21,6 +25,47 @@ import {
 // Uses Firebase Admin/Firestore or session verification; force the Node.js runtime.
 export const runtime = "nodejs";
 
+type SyncReasonCode =
+  | "sync_start"
+  | "connection_not_found"
+  | "connection_not_connected"
+  | ProviderTokenSyncReason
+  | "truelayer_fetch_start"
+  | "truelayer_accounts_fetch_failed"
+  | "truelayer_balances_fetch_failed"
+  | "truelayer_transactions_fetch_failed"
+  | "sync_success";
+
+function logSyncReason(input: {
+  level?: "info" | "warn" | "error";
+  reason: SyncReasonCode;
+  userId: string;
+  connectionId: string;
+  provider?: string | null;
+}) {
+  return logServerEvent({
+    level: input.level ?? "info",
+    event: "provider_sync_event",
+    message: "Bank connection sync status.",
+    metadata: {
+      reason: input.reason,
+      userId: input.userId,
+      connectionId: input.connectionId,
+      provider: input.provider ?? null,
+    },
+  });
+}
+
+function nonSyncableConnection(connection: { provider: string; status: string; consentStatus: string }) {
+  return (
+    connection.provider !== "mock" &&
+    (connection.status === "disconnected" ||
+      connection.consentStatus === "revoked" ||
+      connection.consentStatus === "expired" ||
+      connection.consentStatus !== "active")
+  );
+}
+
 export async function POST(
   _request: Request,
   context: { params: Promise<{ connectionId: string }> },
@@ -32,9 +77,20 @@ export async function POST(
   }
 
   const { connectionId } = await context.params;
+  logSyncReason({
+    reason: "sync_start",
+    userId: auth.user.id,
+    connectionId,
+  });
   const connection = await getBankConnectionById(connectionId);
 
   if (!connection) {
+    logSyncReason({
+      level: "warn",
+      reason: "connection_not_found",
+      userId: auth.user.id,
+      connectionId,
+    });
     const error = new ProviderSafeError(
       "provider_sync_failed",
       "The requested connection could not be found.",
@@ -45,8 +101,68 @@ export async function POST(
     });
   }
 
-  const tokenRecord =
-    connection.provider === "mock" ? null : await getProviderToken(auth.user.id, connection.id);
+  if (nonSyncableConnection(connection)) {
+    logSyncReason({
+      level: "warn",
+      reason: "connection_not_connected",
+      userId: auth.user.id,
+      connectionId: connection.id,
+      provider: connection.provider,
+    });
+    const error = new ProviderSafeError(
+      "provider_sync_failed",
+      "Reconnect required before this bank connection can sync.",
+      409,
+    );
+
+    return NextResponse.json(
+      {
+        ...createSafeErrorPayload(error, "provider_sync_failed"),
+        reason: "connection_not_connected",
+      },
+      { status: error.status },
+    );
+  }
+
+  const tokenPreflight =
+    connection.provider === "mock"
+      ? null
+      : await getProviderTokenForSync(auth.user.id, connection.id);
+
+  if (tokenPreflight && !tokenPreflight.ok) {
+    logSyncReason({
+      level: "warn",
+      reason: tokenPreflight.reason,
+      userId: auth.user.id,
+      connectionId: connection.id,
+      provider: connection.provider,
+    });
+
+    const error = new ProviderSafeError(
+      "provider_sync_failed",
+      tokenPreflight.message,
+      tokenPreflight.status,
+    );
+
+    return NextResponse.json(
+      {
+        ...createSafeErrorPayload(error, "provider_sync_failed"),
+        reason: tokenPreflight.reason,
+      },
+      { status: error.status },
+    );
+  }
+
+  if (connection.provider === "truelayer") {
+    logSyncReason({
+      reason: "truelayer_fetch_start",
+      userId: auth.user.id,
+      connectionId: connection.id,
+      provider: connection.provider,
+    });
+  }
+
+  const tokenRecord = tokenPreflight?.ok ? tokenPreflight.record : null;
   const result = await syncBankConnection({
     userId: auth.user.id,
     connection,
@@ -81,6 +197,23 @@ export async function POST(
       severity: result.status === "success" ? "info" : "urgent",
     }),
   );
+
+  if (result.status === "success") {
+    logSyncReason({
+      reason: "sync_success",
+      userId: auth.user.id,
+      connectionId: result.connection.id,
+      provider: result.connection.provider,
+    });
+  } else if (connection.provider === "truelayer") {
+    logSyncReason({
+      level: "warn",
+      reason: "truelayer_accounts_fetch_failed",
+      userId: auth.user.id,
+      connectionId: result.connection.id,
+      provider: result.connection.provider,
+    });
+  }
 
   return NextResponse.json({
     status: result.status,

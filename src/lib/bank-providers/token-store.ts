@@ -19,6 +19,7 @@ export type ProviderTokenRecord = {
   provider: BankProvider;
   tokenReference: string;
   encryptedTokenPayload: string | null;
+  refreshTokenPresent?: boolean;
   providerUserId: string | null;
   providerConnectionId: string | null;
   expiresAt: string | null;
@@ -28,6 +29,36 @@ export type ProviderTokenRecord = {
   revokedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProviderTokenSyncReason =
+  | "token_record_missing"
+  | "token_connection_id_mismatch"
+  | "token_decrypt_failed"
+  | "token_expired_refresh_missing"
+  | "token_refresh_failed";
+
+export type ProviderTokenSyncPreflight =
+  | {
+      ok: true;
+      record: ProviderTokenRecord;
+      diagnostics: ProviderTokenDiagnostics;
+    }
+  | {
+      ok: false;
+      reason: ProviderTokenSyncReason;
+      status: number;
+      message: string;
+      diagnostics: ProviderTokenDiagnostics;
+    };
+
+export type ProviderTokenDiagnostics = {
+  connectionId: string;
+  tokenRecordPresent: boolean;
+  tokenDecryptable: "yes" | "no" | "not_tested";
+  tokenLinkedToConnection: "yes" | "no";
+  syncEligible: "yes" | "no";
+  reasonCode: ProviderTokenSyncReason | null;
 };
 
 export type SaveProviderTokenInput = {
@@ -84,6 +115,24 @@ function accessTokenFromPayload(payload: unknown) {
   return typeof accessToken === "string" && accessToken.length > 0 ? accessToken : null;
 }
 
+function refreshTokenFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const tokenLike = payload as {
+    refresh_token?: unknown;
+    refreshToken?: unknown;
+  };
+  const refreshToken = tokenLike.refresh_token ?? tokenLike.refreshToken;
+
+  return typeof refreshToken === "string" && refreshToken.length > 0 ? refreshToken : null;
+}
+
+function isExpired(value: string | null) {
+  return Boolean(value && new Date(value).getTime() <= Date.now());
+}
+
 function storageToRuntimeRecord(
   record: ProviderTokenStorageRecord,
 ): ProviderTokenRecord {
@@ -92,6 +141,7 @@ function storageToRuntimeRecord(
   if (record.encryptedTokenPayload) {
     const payload = decryptTokenPayload(record.encryptedTokenPayload);
     const accessToken = accessTokenFromPayload(payload);
+    const refreshToken = refreshTokenFromPayload(payload);
 
     if (!accessToken) {
       throw new ProviderSafeError(
@@ -102,6 +152,10 @@ function storageToRuntimeRecord(
     }
 
     tokenReference = accessToken;
+    record = {
+      ...record,
+      refreshTokenExpiresAt: refreshToken ? record.refreshTokenExpiresAt : null,
+    };
   }
 
   return {
@@ -109,6 +163,7 @@ function storageToRuntimeRecord(
     provider: record.provider,
     tokenReference,
     encryptedTokenPayload: record.encryptedTokenPayload,
+    refreshTokenPresent: Boolean(record.encryptedTokenPayload && record.refreshTokenExpiresAt),
     providerUserId: record.providerUserId,
     providerConnectionId: record.providerConnectionId,
     expiresAt: record.expiresAt,
@@ -154,9 +209,20 @@ export async function saveProviderToken(
     );
   }
 
+  if (input.tokenPayload && !accessTokenFromPayload(input.tokenPayload)) {
+    throw new ProviderSafeError(
+      "provider_callback_failed",
+      "TrueLayer did not return usable token metadata. Reconnect the bank account.",
+      400,
+    );
+  }
+
   const encryptedTokenPayload = input.tokenPayload
     ? encryptTokenPayload(input.tokenPayload)
     : null;
+  const refreshTokenPresent = input.tokenPayload
+    ? Boolean(refreshTokenFromPayload(input.tokenPayload))
+    : false;
   const tokenReference = input.tokenPayload
     ? (accessTokenFromPayload(input.tokenPayload) ?? `token-ref:${input.provider}:${input.connectionId}`)
     : `token-ref:${input.provider}:${input.connectionId}`;
@@ -165,11 +231,12 @@ export async function saveProviderToken(
     provider: input.provider,
     tokenReference,
     encryptedTokenPayload,
+    refreshTokenPresent,
     providerUserId: input.providerUserId ?? null,
     providerConnectionId: input.providerConnectionId ?? null,
     expiresAt: input.expiresAt,
     accessTokenExpiresAt: input.accessTokenExpiresAt ?? input.expiresAt,
-    refreshTokenExpiresAt: input.refreshTokenExpiresAt ?? null,
+    refreshTokenExpiresAt: refreshTokenPresent ? input.refreshTokenExpiresAt ?? null : null,
     scopes: input.scopes,
     revokedAt: null,
     createdAt: now,
@@ -196,6 +263,165 @@ export async function saveProviderToken(
   }
 
   return record;
+}
+
+function missingDiagnostics(connectionId: string): ProviderTokenDiagnostics {
+  return {
+    connectionId,
+    tokenRecordPresent: false,
+    tokenDecryptable: "not_tested",
+    tokenLinkedToConnection: "no",
+    syncEligible: "no",
+    reasonCode: "token_record_missing",
+  };
+}
+
+function diagnosticsForRecord(
+  connectionId: string,
+  record: ProviderTokenRecord | ProviderTokenStorageRecord,
+  changes: Partial<ProviderTokenDiagnostics> = {},
+): ProviderTokenDiagnostics {
+  const linked = record.connectionId === connectionId;
+
+  return {
+    connectionId,
+    tokenRecordPresent: true,
+    tokenDecryptable: "not_tested",
+    tokenLinkedToConnection: linked ? "yes" : "no",
+    syncEligible: linked ? "yes" : "no",
+    reasonCode: linked ? null : "token_connection_id_mismatch",
+    ...changes,
+  };
+}
+
+export async function getProviderTokenDiagnostics(
+  userId: string,
+  connectionId: string,
+): Promise<ProviderTokenDiagnostics> {
+  const stored = isFirebaseBackend()
+    ? await getStoredProviderToken(userId, connectionId)
+    : tokenPlaceholders.get(tokenKey(userId, connectionId)) ?? null;
+
+  if (!stored) {
+    return missingDiagnostics(connectionId);
+  }
+
+  try {
+    const record =
+      "encryptedTokenPayload" in stored && stored.encryptedTokenPayload
+        ? storageToRuntimeRecord(stored as ProviderTokenStorageRecord)
+        : (stored as ProviderTokenRecord);
+    const linked = record.connectionId === connectionId;
+    const expiredWithoutRefresh = isExpired(record.accessTokenExpiresAt) && !record.refreshTokenPresent;
+
+    return diagnosticsForRecord(connectionId, record, {
+      tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
+      syncEligible: linked && !expiredWithoutRefresh ? "yes" : "no",
+      reasonCode: !linked
+        ? "token_connection_id_mismatch"
+        : expiredWithoutRefresh
+          ? "token_expired_refresh_missing"
+          : null,
+    });
+  } catch {
+    return diagnosticsForRecord(connectionId, stored, {
+      tokenDecryptable: "no",
+      syncEligible: "no",
+      reasonCode: "token_decrypt_failed",
+    });
+  }
+}
+
+export async function getProviderTokenForSync(
+  userId: string,
+  connectionId: string,
+): Promise<ProviderTokenSyncPreflight> {
+  const stored = isFirebaseBackend()
+    ? await getStoredProviderToken(userId, connectionId)
+    : tokenPlaceholders.get(tokenKey(userId, connectionId)) ?? null;
+
+  if (!stored) {
+    return {
+      ok: false,
+      reason: "token_record_missing",
+      status: 409,
+      message: "Reconnect required before this bank connection can sync.",
+      diagnostics: missingDiagnostics(connectionId),
+    };
+  }
+
+  let record: ProviderTokenRecord;
+
+  try {
+    record =
+      "encryptedTokenPayload" in stored && stored.encryptedTokenPayload
+        ? storageToRuntimeRecord(stored as ProviderTokenStorageRecord)
+        : (stored as ProviderTokenRecord);
+  } catch {
+    return {
+      ok: false,
+      reason: "token_decrypt_failed",
+      status: 409,
+      message: "Reconnect required because the stored bank token could not be read.",
+      diagnostics: diagnosticsForRecord(connectionId, stored, {
+        tokenDecryptable: "no",
+        syncEligible: "no",
+        reasonCode: "token_decrypt_failed",
+      }),
+    };
+  }
+
+  if (record.connectionId !== connectionId) {
+    return {
+      ok: false,
+      reason: "token_connection_id_mismatch",
+      status: 409,
+      message: "Reconnect required because the stored token is not linked to this connection.",
+      diagnostics: diagnosticsForRecord(connectionId, record, {
+        tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
+        syncEligible: "no",
+        reasonCode: "token_connection_id_mismatch",
+      }),
+    };
+  }
+
+  if (isExpired(record.accessTokenExpiresAt) && !record.refreshTokenPresent) {
+    return {
+      ok: false,
+      reason: "token_expired_refresh_missing",
+      status: 409,
+      message: "Reconnect required because the stored bank token has expired.",
+      diagnostics: diagnosticsForRecord(connectionId, record, {
+        tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
+        syncEligible: "no",
+        reasonCode: "token_expired_refresh_missing",
+      }),
+    };
+  }
+
+  if (isExpired(record.accessTokenExpiresAt) && record.refreshTokenPresent) {
+    return {
+      ok: false,
+      reason: "token_refresh_failed",
+      status: 409,
+      message: "Reconnect required because the stored bank token could not be refreshed.",
+      diagnostics: diagnosticsForRecord(connectionId, record, {
+        tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
+        syncEligible: "no",
+        reasonCode: "token_refresh_failed",
+      }),
+    };
+  }
+
+  return {
+    ok: true,
+    record,
+    diagnostics: diagnosticsForRecord(connectionId, record, {
+      tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
+      syncEligible: "yes",
+      reasonCode: null,
+    }),
+  };
 }
 
 export async function getProviderToken(

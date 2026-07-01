@@ -171,10 +171,26 @@ export function buildTrueLayerAuthorizationUrl({
   };
 }
 
-async function fetchJson(request: Request) {
+async function fetchJson(
+  request: Request,
+  failureReason:
+    | "truelayer_accounts_fetch_failed"
+    | "truelayer_balances_fetch_failed"
+    | "truelayer_transactions_fetch_failed",
+) {
   const response = await fetch(request);
 
   if (!response.ok) {
+    logServerEvent({
+      level: "warn",
+      event: "provider_sync_event",
+      message: "TrueLayer fetch failed.",
+      metadata: {
+        reason: failureReason,
+        status: response.status,
+        host: new URL(request.url).hostname,
+      },
+    });
     throw new ProviderSafeError(
       "provider_sync_failed",
       "TrueLayer sandbox request failed. No provider credentials were exposed.",
@@ -223,6 +239,7 @@ async function defaultTrueLayerClientFactory(
         new Request(`${config.apiBaseUrl}/data/v1/accounts`, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
+        "truelayer_accounts_fetch_failed",
       );
     },
     async getCards(input) {
@@ -231,6 +248,7 @@ async function defaultTrueLayerClientFactory(
         new Request(`${config.apiBaseUrl}/data/v1/cards`, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
+        "truelayer_accounts_fetch_failed",
       );
     },
     async getBalances(input) {
@@ -242,6 +260,7 @@ async function defaultTrueLayerClientFactory(
             new Request(`${config.apiBaseUrl}/data/v1/accounts/${accountId}/balance`, {
               headers: { authorization: `Bearer ${context.tokenReference}` },
             }),
+            "truelayer_balances_fetch_failed",
           );
 
           return rows.map((row) => ({
@@ -275,6 +294,7 @@ async function defaultTrueLayerClientFactory(
         new Request(url, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
+        "truelayer_transactions_fetch_failed",
       );
     },
     async revokeConnection() {
