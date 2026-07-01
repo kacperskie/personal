@@ -124,6 +124,9 @@ export async function updateTransactionBudgetOverrideAction(formData: FormData) 
       includeInMonthlyBudget: checkboxValue(formData.get("includeInMonthlyBudget")),
       includeInSpendingSummaries: checkboxValue(formData.get("includeInSpendingSummaries")),
       includeInSafeToSpendImpact: checkboxValue(formData.get("includeInSafeToSpendImpact")),
+      includeInCreditCardBalanceEstimate: checkboxValue(
+        formData.get("includeInCreditCardBalanceEstimate"),
+      ),
       budgetCategory: optionalString(formData.get("budgetCategory")),
       exclusionReason: optionalString(
         formData.get("exclusionReason"),
@@ -171,6 +174,7 @@ export async function quickTransactionBudgetOverrideAction(
       includeInMonthlyBudget: true,
       includeInSpendingSummaries: true,
       includeInSafeToSpendImpact: true,
+      includeInCreditCardBalanceEstimate: true,
       exclusionReason: null,
     },
     exclude_weekly: { includeInWeeklyBudget: false },
@@ -194,6 +198,7 @@ export async function quickTransactionBudgetOverrideAction(
       includeInMonthlyBudget: false,
       includeInSpendingSummaries: false,
       includeInSafeToSpendImpact: false,
+      includeInCreditCardBalanceEstimate: true,
       exclusionReason: "credit_card_payment" as const,
     },
     amex_pocket_transfer: {

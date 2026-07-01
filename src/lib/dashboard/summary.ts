@@ -8,6 +8,8 @@ import type {
   Budget,
   BudgetPeriod,
   Category,
+  CreditCardBalanceSummary,
+  CreditCardPlanningBalanceSource,
   Debt,
   DebtFreedomSummary,
   ManualFinanceItem,
@@ -80,6 +82,9 @@ import {
 } from "@/lib/bank-providers/sandbox-data";
 import {
   amexFundingSummary,
+  applyCreditCardPlanningBalances,
+  buildCreditCardBalanceSummaries,
+  calculateCreditCardBalanceSummary,
   exclusionCountsByReason,
 } from "@/lib/finance-interpretation";
 import {
@@ -121,14 +126,27 @@ export type CreditCardFundingSummary = {
   liabilityName: string;
   balance: number;
   balanceKnown: boolean;
-  balanceSource: Account["balanceSource"];
+  balanceSource: CreditCardPlanningBalanceSource;
+  confidence: CreditCardBalanceSummary["confidence"];
   paymentDueDate: string | null;
   statementStartDate: string | null;
   statementEndDate: string | null;
+  manualAnchorDate: string | null;
   balanceUnavailableReason: string | null;
+  providerCurrentBalance: number | null;
+  providerStatementBalance: number | null;
+  estimatedCurrentBalance: number | null;
+  postStatementPurchases: number;
+  postStatementPayments: number;
+  postStatementRefunds: number;
+  postStatementFees: number;
+  transactionsIncludedCount: number;
+  transactionsExcludedCount: number;
+  calculatedAt: string;
   reservedBalance: number;
   fundedBalance: number;
   unfundedBalance: number;
+  excessReserved: number;
   reservedAccountIds: string[];
 };
 
@@ -144,7 +162,17 @@ export type DashboardDiagnostics = {
     name: string;
     balance: number;
     balanceKnown: boolean;
-    balanceSource: Account["balanceSource"];
+    balanceSource: CreditCardPlanningBalanceSource;
+    confidence: CreditCardBalanceSummary["confidence"];
+    providerStatementBalance: number | null;
+    manualAnchorDate: string | null;
+    estimatedCurrentBalance: number | null;
+    postStatementPurchases: number;
+    postStatementPayments: number;
+    postStatementRefunds: number;
+    postStatementFees: number;
+    transactionsIncludedCount: number;
+    transactionsExcludedCount: number;
     warning: string | null;
   }>;
   overdraftAccounts: Array<{ id: string; name: string; overdraftUsed: number; overdraftLimit: number | null }>;
@@ -313,7 +341,14 @@ function userDataPresent(data: DashboardSummaryData) {
   );
 }
 
-function dashboardWarnings(data: DashboardSummaryData) {
+function dashboardWarnings(
+  data: DashboardSummaryData,
+  creditCardSummaries = buildCreditCardBalanceSummaries(
+    data.accounts,
+    data.transactions,
+    data.transactionBudgetOverrides,
+  ),
+) {
   const syncWarnings = data.bankConnections
     .filter((connection) => connection.status === "sync_failed")
     .map((connection) =>
@@ -321,18 +356,28 @@ function dashboardWarnings(data: DashboardSummaryData) {
         ? `${connection.institutionName} sync failed: ${connection.errorMessage}`
         : `${connection.institutionName} sync failed. Last known data is still shown.`,
     );
+  const summaryByAccountId = new Map(
+    creditCardSummaries.map((summary) => [summary.accountId, summary]),
+  );
   const cardWarnings = data.accounts
     .filter((account) => account.type === "credit_card")
     .flatMap((account) => {
-      if (account.balanceAvailable === false) {
+      const summary = summaryByAccountId.get(account.id);
+      if (!summary || summary.balanceSource === "unavailable") {
         return [
-          `${account.name} balance unavailable from provider; debt and Amex funding may be understated.`,
+          `${account.name} balance unavailable; safe-to-spend may be optimistic until the balance is known or manually anchored.`,
         ];
       }
 
-      if (account.balanceSource === "statement") {
+      if (summary.balanceSource === "provider_statement_estimate") {
         return [
-          `${account.name} current balance is not available from provider; using statement balance if available.`,
+          `${account.name} current balance is not available from provider; estimating from statement balance and synced transactions.`,
+        ];
+      }
+
+      if (summary.balanceSource === "manual_anchor_estimate") {
+        return [
+          `${account.name} current balance is estimated from a manual anchor and synced transactions.`,
         ];
       }
 
@@ -379,7 +424,12 @@ function normaliseReservedFor(value: string | null | undefined) {
   return value?.toLowerCase().replace(/[^a-z0-9]+/g, "") ?? "";
 }
 
-function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSummary[] {
+function creditCardFundingSummaries(
+  accounts: Account[],
+  transactions: Transaction[],
+  overrides: TransactionBudgetOverride[],
+  calculatedAt?: string,
+): CreditCardFundingSummary[] {
   const reservedAccounts = accounts.filter(
     (account) =>
       account.status === "active" &&
@@ -404,8 +454,14 @@ function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSumma
           account.linkedLiabilityAccountId === liability.id ||
           (normaliseReservedFor(account.reservedFor) === "amex" && isAmex),
       );
-      const balance = Math.abs(Math.min(liability.balance, 0));
-      const balanceKnown = liability.balanceAvailable !== false;
+      const balanceSummary = calculateCreditCardBalanceSummary({
+        account: liability,
+        transactions,
+        overrides,
+        calculatedAt,
+      });
+      const balance = balanceSummary.balanceUsedForPlanning ?? 0;
+      const balanceKnown = balanceSummary.balanceUsedForPlanning !== null;
       const reservedBalance = matchingReserved.reduce((total, account) => total + account.balance, 0);
       const fundedBalance = Math.min(balance, reservedBalance);
 
@@ -414,14 +470,27 @@ function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSumma
         liabilityName: liability.name,
         balance,
         balanceKnown,
-        balanceSource: liability.balanceSource ?? (balanceKnown ? "current" : "unavailable"),
-        paymentDueDate: liability.paymentDueDate ?? null,
-        statementStartDate: liability.statementStartDate ?? null,
-        statementEndDate: liability.statementEndDate ?? null,
+        balanceSource: balanceSummary.balanceSource,
+        confidence: balanceSummary.confidence,
+        paymentDueDate: balanceSummary.paymentDueDate,
+        statementStartDate: balanceSummary.statementStartDate,
+        statementEndDate: balanceSummary.statementEndDate,
+        manualAnchorDate: balanceSummary.manualAnchorDate,
         balanceUnavailableReason: liability.balanceUnavailableReason ?? null,
+        providerCurrentBalance: balanceSummary.providerCurrentBalance,
+        providerStatementBalance: balanceSummary.providerStatementBalance,
+        estimatedCurrentBalance: balanceSummary.estimatedCurrentBalance,
+        postStatementPurchases: balanceSummary.postStatementPurchases,
+        postStatementPayments: balanceSummary.postStatementPayments,
+        postStatementRefunds: balanceSummary.postStatementRefunds,
+        postStatementFees: balanceSummary.postStatementFees,
+        transactionsIncludedCount: balanceSummary.transactionsIncludedCount,
+        transactionsExcludedCount: balanceSummary.transactionsExcludedCount,
+        calculatedAt: balanceSummary.calculatedAt,
         reservedBalance,
         fundedBalance,
         unfundedBalance: Math.max(balance - reservedBalance, 0),
+        excessReserved: Math.max(reservedBalance - balance, 0),
         reservedAccountIds: matchingReserved.map((account) => account.id),
         isAmex,
       };
@@ -440,6 +509,7 @@ function dashboardDiagnostics(
   billsAccount: BillsAccountSummary,
   asOfDate: string,
   nextPaydayDate: string,
+  creditCardSummaries: CreditCardBalanceSummary[],
 ): DashboardDiagnostics {
   const weeklyExclusions = exclusionCountsByReason(
     data.transactions,
@@ -453,7 +523,15 @@ function dashboardDiagnostics(
     data.transactionBudgetOverrides,
     "monthly",
   );
-  const amex = amexFundingSummary(data.accounts);
+  const amex = amexFundingSummary(
+    data.accounts,
+    data.transactions,
+    data.transactionBudgetOverrides,
+    `${asOfDate}T00:00:00.000Z`,
+  );
+  const summaryByAccountId = new Map(
+    creditCardSummaries.map((summary) => [summary.accountId, summary]),
+  );
   const billsDueBeforePayday = calculateBillsDueBeforePayday(
     data.bills,
     data.subscriptions,
@@ -487,19 +565,39 @@ function dashboardDiagnostics(
     linkedAmexPocketBalance: amex.linkedPocketBalance,
     creditCardLiabilities: data.accounts
       .filter((account) => account.type === "credit_card" && account.status === "active")
-      .map((account) => ({
-        id: account.id,
-        name: account.name,
-        balance: Math.abs(Math.min(account.balance, 0)),
-        balanceKnown: account.balanceAvailable !== false,
-        balanceSource: account.balanceSource ?? (account.balanceAvailable === false ? "unavailable" : "current"),
-        warning:
-          account.balanceAvailable === false
-            ? "Balance unavailable from provider"
-            : account.balanceSource === "statement"
-              ? "Current balance unavailable; using statement balance"
-            : null,
-      })),
+      .map((account) => {
+        const summary =
+          summaryByAccountId.get(account.id) ??
+          calculateCreditCardBalanceSummary({
+            account,
+            transactions: data.transactions,
+            overrides: data.transactionBudgetOverrides,
+            calculatedAt: `${asOfDate}T00:00:00.000Z`,
+          });
+        return {
+          id: account.id,
+          name: account.name,
+          balance: summary.balanceUsedForPlanning ?? 0,
+          balanceKnown: summary.balanceUsedForPlanning !== null,
+          balanceSource: summary.balanceSource,
+          confidence: summary.confidence,
+          providerStatementBalance: summary.providerStatementBalance,
+          manualAnchorDate: summary.manualAnchorDate,
+          estimatedCurrentBalance: summary.estimatedCurrentBalance,
+          postStatementPurchases: summary.postStatementPurchases,
+          postStatementPayments: summary.postStatementPayments,
+          postStatementRefunds: summary.postStatementRefunds,
+          postStatementFees: summary.postStatementFees,
+          transactionsIncludedCount: summary.transactionsIncludedCount,
+          transactionsExcludedCount: summary.transactionsExcludedCount,
+          warning:
+            summary.balanceSource === "unavailable"
+              ? "Balance unavailable"
+              : summary.confidence === "estimated"
+                ? "Estimated balance, not provider-confirmed current balance"
+                : null,
+        };
+      }),
     overdraftAccounts: data.accounts
       .filter((account) => account.purpose === "overdraft_account" && account.status === "active")
       .map((account) => ({
@@ -527,6 +625,17 @@ export function buildDashboardSummaryFromData(
   const period = activePeriod(data.budgetPeriods, asOfDate);
   const ratio = elapsedRatio(period, asOfDate);
   const nextPaydayDate = getNextPaydayDate(asOfDate, data.profile.paydayDayOfMonth);
+  const calculatedAt = `${asOfDate}T00:00:00.000Z`;
+  const creditCardBalanceSummaries = buildCreditCardBalanceSummaries(
+    data.accounts,
+    data.transactions,
+    data.transactionBudgetOverrides,
+    calculatedAt,
+  );
+  const accountsForPlanning = applyCreditCardPlanningBalances(
+    data.accounts,
+    creditCardBalanceSummaries,
+  );
   const plannedSavingsBeforePayday = data.savingsGoals
     .filter((goal) => goal.status === "active")
     .reduce((total, goal) => total + goal.monthlyContribution, 0);
@@ -545,7 +654,12 @@ export function buildDashboardSummaryFromData(
     asOfDate,
     nextPaydayDate,
   );
-  const amexFunding = amexFundingSummary(data.accounts);
+  const amexFunding = amexFundingSummary(
+    data.accounts,
+    data.transactions,
+    data.transactionBudgetOverrides,
+    calculatedAt,
+  );
   const unfundedAmexExposure = amexFunding.unfundedAmount ?? 0;
   const safeToSpend = calculateSafeToSpendAmount({
     currentCash: safeToSpendEligibleCash,
@@ -578,7 +692,7 @@ export function buildDashboardSummaryFromData(
     data.categories,
     period,
     ratio,
-    data.accounts,
+    accountsForPlanning,
     data.transactionBudgetOverrides,
   );
   const billsAccount = summariseBillsAccount(
@@ -629,7 +743,7 @@ export function buildDashboardSummaryFromData(
       })
     : null;
   const debtFreedom = calculateDebtFreedomSummary({
-    debts: buildDebtInputs(data.debts, data.manualFinanceItems, data.accounts),
+    debts: buildDebtInputs(data.debts, data.manualFinanceItems, accountsForPlanning),
     strategy: "avalanche",
     extraPaymentAvailable: Math.max(safeToSpend - data.profile.minimumBuffer, 0),
     startDate: asOfDate,
@@ -686,14 +800,14 @@ export function buildDashboardSummaryFromData(
         expectedIncome: projectionIncome,
         plannedOutflows: projectionOutflows,
       }),
-      totalAssets: calculateTotalAssets(data.accounts, data.manualFinanceItems),
+      totalAssets: calculateTotalAssets(accountsForPlanning, data.manualFinanceItems),
       totalLiabilities: calculateTotalLiabilities(
-        data.accounts,
+        accountsForPlanning,
         data.debts,
         data.manualFinanceItems,
       ),
-      netWorth: calculateNetWorth(data.accounts, data.debts, data.manualFinanceItems),
-      debtSummary: calculateDebtSummary(data.debts, data.manualFinanceItems, data.accounts),
+      netWorth: calculateNetWorth(accountsForPlanning, data.debts, data.manualFinanceItems),
+      debtSummary: calculateDebtSummary(data.debts, data.manualFinanceItems, accountsForPlanning),
       safeToSpendEligibleCash,
       billsAccountBalance: calculateBillsAccountBalance(data.accounts),
       cashflowAccountBalance: calculateCashflowAccountBalance(data.accounts),
@@ -706,7 +820,12 @@ export function buildDashboardSummaryFromData(
       paydayAllocation,
       overdraft,
       debtFreedom,
-      creditCardFunding: creditCardFundingSummaries(data.accounts),
+      creditCardFunding: creditCardFundingSummaries(
+        data.accounts,
+        data.transactions,
+        data.transactionBudgetOverrides,
+        calculatedAt,
+      ),
       nextBestAction,
     },
     budgetHealth,
@@ -723,8 +842,14 @@ export function buildDashboardSummaryFromData(
       bankConnections: data.bankConnections.length,
       transactionBudgetOverrides: data.transactionBudgetOverrides.length,
     },
-    diagnostics: dashboardDiagnostics(data, billsAccount, asOfDate, nextPaydayDate),
-    warnings: dashboardWarnings(data),
+    diagnostics: dashboardDiagnostics(
+      data,
+      billsAccount,
+      asOfDate,
+      nextPaydayDate,
+      creditCardBalanceSummaries,
+    ),
+    warnings: dashboardWarnings(data, creditCardBalanceSummaries),
   };
 }
 

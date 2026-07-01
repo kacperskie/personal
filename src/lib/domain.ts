@@ -111,6 +111,14 @@ export type ConsentStatus =
 
 export type AccountBalanceSource = "current" | "statement" | "unavailable";
 
+export type CreditCardPlanningBalanceSource =
+  | "provider_current"
+  | "provider_statement_estimate"
+  | "manual_anchor_estimate"
+  | "unavailable";
+
+export type CreditCardBalanceConfidence = "confirmed" | "estimated" | "unavailable";
+
 export type Account = {
   id: string;
   userId: string;
@@ -133,6 +141,9 @@ export type Account = {
   paymentDueDate?: string | null;
   statementStartDate?: string | null;
   statementEndDate?: string | null;
+  manualAnchorBalance?: number | null;
+  manualAnchorDate?: string | null;
+  manualAnchorNote?: string | null;
   balanceDiagnostics?: {
     endpointCalled?: boolean;
     status?: number | null;
@@ -314,11 +325,34 @@ export type TransactionBudgetOverride = {
   includeInMonthlyBudget: boolean;
   includeInSpendingSummaries: boolean;
   includeInSafeToSpendImpact: boolean;
+  includeInCreditCardBalanceEstimate?: boolean;
   budgetCategory?: string | null;
   exclusionReason?: TransactionBudgetExclusionReason | null;
   userNote?: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CreditCardBalanceSummary = {
+  accountId: string;
+  providerCurrentBalance: number | null;
+  providerStatementBalance: number | null;
+  statementStartDate: string | null;
+  statementEndDate: string | null;
+  paymentDueDate: string | null;
+  manualAnchorBalance: number | null;
+  manualAnchorDate: string | null;
+  estimatedCurrentBalance: number | null;
+  balanceUsedForPlanning: number | null;
+  balanceSource: CreditCardPlanningBalanceSource;
+  confidence: CreditCardBalanceConfidence;
+  postStatementPurchases: number;
+  postStatementPayments: number;
+  postStatementRefunds: number;
+  postStatementFees: number;
+  transactionsIncludedCount: number;
+  transactionsExcludedCount: number;
+  calculatedAt: string;
 };
 
 export type ProviderSyncEvent = {

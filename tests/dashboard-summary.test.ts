@@ -395,10 +395,11 @@ describe("dashboard summary", () => {
       balanceKnown: false,
       balance: 0,
     });
-    expect(model.warnings.join(" ")).toContain("balance unavailable from provider");
+    expect(model.warnings.join(" ")).toContain("balance unavailable");
+    expect(model.warnings.join(" ")).toContain("safe-to-spend may be optimistic");
     expect(model.diagnostics.creditCardLiabilities[0]).toMatchObject({
       balanceKnown: false,
-      warning: "Balance unavailable from provider",
+      warning: "Balance unavailable",
     });
   });
 
@@ -471,14 +472,15 @@ describe("dashboard summary", () => {
       liabilityAccountId: "acct_amex_statement",
       balance: 300,
       balanceKnown: true,
-      balanceSource: "statement",
+      balanceSource: "provider_statement_estimate",
+      confidence: "estimated",
       reservedBalance: 250,
       unfundedBalance: 50,
       paymentDueDate: "2026-07-21",
     });
     expect(model.summary.safeToSpend).toBe(450);
     expect(model.warnings.join(" ")).toContain(
-      "current balance is not available from provider; using statement balance",
+      "current balance is not available from provider; estimating from statement balance",
     );
   });
 
@@ -498,6 +500,7 @@ describe("dashboard summary", () => {
         balanceAvailable: true,
         balanceSource: "statement",
         statementBalance: 0,
+        statementEndDate: "2026-06-30",
         includeInSafeToSpend: false,
         includeInCashflow: true,
         includeInNetWorth: true,
@@ -513,7 +516,8 @@ describe("dashboard summary", () => {
       liabilityAccountId: "acct_amex_zero",
       balance: 0,
       balanceKnown: true,
-      balanceSource: "statement",
+      balanceSource: "provider_statement_estimate",
+      confidence: "estimated",
     });
   });
 

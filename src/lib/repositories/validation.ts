@@ -12,7 +12,8 @@ export type AccountUpdatePayload = Pick<
   | "linkedLiabilityAccountId"
   | "overdraftLimit"
   | "overdraftRepaymentTarget"
->;
+> &
+  Partial<Pick<Account, "manualAnchorBalance" | "manualAnchorDate" | "manualAnchorNote">>;
 
 export function createAccountUpdatePayload(input: AccountUpdatePayload) {
   return {
@@ -32,6 +33,12 @@ export function createAccountUpdatePayload(input: AccountUpdatePayload) {
       input.overdraftRepaymentTarget === null || input.overdraftRepaymentTarget === undefined
         ? null
         : Math.max(Number(input.overdraftRepaymentTarget), 0),
+    manualAnchorBalance:
+      input.manualAnchorBalance === null || input.manualAnchorBalance === undefined
+        ? null
+        : Math.max(Number(input.manualAnchorBalance), 0),
+    manualAnchorDate: input.manualAnchorDate ?? null,
+    manualAnchorNote: input.manualAnchorNote?.trim() ? input.manualAnchorNote.trim() : null,
   };
 }
 

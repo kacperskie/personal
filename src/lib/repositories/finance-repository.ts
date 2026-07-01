@@ -241,6 +241,10 @@ export async function upsertAccount(account: Account): Promise<Account> {
           overdraftLimit: existing.overdraftLimit ?? account.overdraftLimit ?? null,
           overdraftRepaymentTarget:
             existing.overdraftRepaymentTarget ?? account.overdraftRepaymentTarget ?? null,
+          manualAnchorBalance:
+            existing.manualAnchorBalance ?? account.manualAnchorBalance ?? null,
+          manualAnchorDate: existing.manualAnchorDate ?? account.manualAnchorDate ?? null,
+          manualAnchorNote: existing.manualAnchorNote ?? account.manualAnchorNote ?? null,
           notes: existing.notes ?? account.notes,
           createdAt: existing.createdAt,
         }
@@ -300,6 +304,9 @@ export async function updateAccountAssignment(
         linkedLiabilityAccountId: updatePayload.linkedLiabilityAccountId,
         overdraftLimit: updatePayload.overdraftLimit,
         overdraftRepaymentTarget: updatePayload.overdraftRepaymentTarget,
+        manualAnchorBalance: updatePayload.manualAnchorBalance,
+        manualAnchorDate: updatePayload.manualAnchorDate,
+        manualAnchorNote: updatePayload.manualAnchorNote,
         updatedAt: new Date().toISOString(),
       });
     }

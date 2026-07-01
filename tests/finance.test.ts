@@ -29,6 +29,7 @@ import {
 import {
   amexFundingSummary,
   calculateBudgetTotal,
+  calculateCreditCardBalanceSummary,
   getTransactionBudgetTreatment,
 } from "../src/lib/finance-interpretation";
 import { mockOpenBankingProvider } from "../src/lib/bank-providers";
@@ -394,6 +395,306 @@ describe("finance calculations", () => {
       balanceKnown: false,
       liabilityBalance: null,
       unfundedAmount: null,
+    });
+  });
+
+  it("uses provider current credit-card balance before statement estimates", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_current",
+      institutionName: "American Express",
+      name: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: -420,
+      balanceAvailable: true,
+      balanceSource: "current",
+      currentBalance: 420,
+      statementBalance: 300,
+      statementEndDate: "2026-06-20",
+    } satisfies Account;
+    const purchase = {
+      ...mockTransactionRecords[0],
+      id: "tx_amex_purchase",
+      accountId: amex.id,
+      date: "2026-06-25",
+      amount: -100,
+      kind: "expense",
+      pending: false,
+      providerStatus: "posted",
+      merchant: "Cafe",
+      description: "Cafe",
+    } satisfies Transaction;
+
+    expect(
+      calculateCreditCardBalanceSummary({
+        account: amex,
+        transactions: [purchase],
+        calculatedAt: "2026-07-01T00:00:00.000Z",
+      }),
+    ).toMatchObject({
+      balanceUsedForPlanning: 420,
+      balanceSource: "provider_current",
+      confidence: "confirmed",
+      estimatedCurrentBalance: null,
+    });
+  });
+
+  it("estimates Amex current balance from statement balance plus purchases minus payments", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_estimate",
+      institutionName: "American Express",
+      name: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: -500,
+      balanceAvailable: true,
+      balanceSource: "statement",
+      currentBalance: null,
+      statementBalance: 500,
+      statementEndDate: "2026-06-20",
+    } satisfies Account;
+    const transactions = [
+      {
+        ...mockTransactionRecords[0],
+        id: "tx_amex_purchase",
+        accountId: amex.id,
+        date: "2026-06-21",
+        amount: -250,
+        kind: "expense",
+        pending: false,
+        providerStatus: "posted",
+        merchant: "Groceries",
+        description: "Groceries",
+      },
+      {
+        ...mockTransactionRecords[0],
+        id: "tx_amex_payment",
+        accountId: amex.id,
+        date: "2026-06-22",
+        amount: 100,
+        kind: "income",
+        pending: false,
+        providerStatus: "posted",
+        merchant: "Payment received",
+        description: "Payment received",
+      },
+      {
+        ...mockTransactionRecords[0],
+        id: "tx_amex_refund",
+        accountId: amex.id,
+        date: "2026-06-23",
+        amount: 40,
+        kind: "income",
+        pending: false,
+        providerStatus: "posted",
+        merchant: "Merchant refund",
+        description: "Refund",
+      },
+      {
+        ...mockTransactionRecords[0],
+        id: "tx_amex_fee",
+        accountId: amex.id,
+        date: "2026-06-24",
+        amount: -10,
+        kind: "expense",
+        pending: false,
+        providerStatus: "posted",
+        merchant: "Interest fee",
+        description: "Interest fee",
+      },
+    ] satisfies Transaction[];
+
+    expect(
+      calculateCreditCardBalanceSummary({
+        account: amex,
+        transactions,
+        calculatedAt: "2026-07-01T00:00:00.000Z",
+      }),
+    ).toMatchObject({
+      balanceSource: "provider_statement_estimate",
+      confidence: "estimated",
+      providerStatementBalance: 500,
+      postStatementPurchases: 250,
+      postStatementPayments: 100,
+      postStatementRefunds: 40,
+      postStatementFees: 10,
+      estimatedCurrentBalance: 620,
+      balanceUsedForPlanning: 620,
+      transactionsIncludedCount: 4,
+    });
+  });
+
+  it("keeps credit-card balance unavailable without provider or manual anchor", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_unavailable",
+      institutionName: "American Express",
+      name: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: 0,
+      balanceAvailable: false,
+      balanceSource: "unavailable",
+      statementBalance: null,
+      statementEndDate: null,
+    } satisfies Account;
+
+    expect(calculateCreditCardBalanceSummary({ account: amex, transactions: [] })).toMatchObject({
+      balanceUsedForPlanning: null,
+      balanceSource: "unavailable",
+      confidence: "unavailable",
+    });
+  });
+
+  it("estimates from manual anchor when statement data is missing", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_manual_anchor",
+      institutionName: "American Express",
+      name: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: 0,
+      balanceAvailable: false,
+      balanceSource: "unavailable",
+      statementBalance: null,
+      statementEndDate: null,
+      manualAnchorBalance: 400,
+      manualAnchorDate: "2026-06-20",
+    } satisfies Account;
+    const purchase = {
+      ...mockTransactionRecords[0],
+      id: "tx_amex_manual_purchase",
+      accountId: amex.id,
+      date: "2026-06-21",
+      amount: -25,
+      kind: "expense",
+      pending: false,
+      providerStatus: "posted",
+      merchant: "Shop",
+      description: "Shop",
+    } satisfies Transaction;
+
+    expect(calculateCreditCardBalanceSummary({ account: amex, transactions: [purchase] })).toMatchObject({
+      balanceSource: "manual_anchor_estimate",
+      confidence: "estimated",
+      estimatedCurrentBalance: 425,
+      balanceUsedForPlanning: 425,
+    });
+  });
+
+  it("excludes pending and manually excluded transactions from Amex estimate", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_exclusions",
+      institutionName: "American Express",
+      name: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: 0,
+      balanceAvailable: true,
+      balanceSource: "statement",
+      statementBalance: 0,
+      statementEndDate: "2026-06-20",
+    } satisfies Account;
+    const posted = {
+      ...mockTransactionRecords[0],
+      id: "tx_amex_posted",
+      accountId: amex.id,
+      date: "2026-06-21",
+      amount: -30,
+      kind: "expense",
+      pending: false,
+      providerStatus: "posted",
+      merchant: "Included",
+      description: "Included",
+    } satisfies Transaction;
+    const pending = {
+      ...posted,
+      id: "tx_amex_pending",
+      amount: -50,
+      pending: true,
+      providerStatus: "pending",
+    } satisfies Transaction;
+    const manuallyExcluded = {
+      ...posted,
+      id: "tx_amex_manual_excluded",
+      amount: -70,
+      merchant: "Excluded",
+    } satisfies Transaction;
+    const override = {
+      id: "txbo_tx_amex_manual_excluded",
+      userId: amex.userId,
+      transactionId: manuallyExcluded.id,
+      accountId: amex.id,
+      includeInWeeklyBudget: true,
+      includeInMonthlyBudget: true,
+      includeInSpendingSummaries: true,
+      includeInSafeToSpendImpact: true,
+      includeInCreditCardBalanceEstimate: false,
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    } satisfies TransactionBudgetOverride;
+
+    expect(
+      calculateCreditCardBalanceSummary({
+        account: amex,
+        transactions: [posted, pending, manuallyExcluded],
+        overrides: [override],
+      }),
+    ).toMatchObject({
+      balanceSource: "provider_statement_estimate",
+      estimatedCurrentBalance: 30,
+      transactionsIncludedCount: 1,
+      transactionsExcludedCount: 2,
+    });
+  });
+
+  it("uses estimated Amex balance for pocket funding without adding excess reserve to spendable cash", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_pocket_estimate",
+      institutionName: "American Express",
+      name: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: 0,
+      balanceAvailable: true,
+      balanceSource: "statement",
+      statementBalance: 100,
+      statementEndDate: "2026-06-20",
+      includeInSafeToSpend: false,
+    } satisfies Account;
+    const pocket = {
+      ...mockAccounts[0],
+      id: "acct_revolut_amex_overfunded",
+      name: "AMEX",
+      institutionName: "Revolut",
+      type: "savings",
+      subtype: "pocket",
+      purpose: "pocket",
+      balance: 150,
+      reservedFor: "amex",
+      includeInSafeToSpend: false,
+      includeInNetWorth: true,
+    } satisfies Account;
+
+    expect(amexFundingSummary([amex, pocket])).toMatchObject({
+      balanceKnown: true,
+      balanceSource: "provider_statement_estimate",
+      confidence: "estimated",
+      liabilityBalance: 100,
+      fundedAmount: 100,
+      unfundedAmount: 0,
+      excessReserved: 50,
     });
   });
 

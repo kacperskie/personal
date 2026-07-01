@@ -1,6 +1,7 @@
 import type {
   Account,
   BudgetPeriod,
+  CreditCardBalanceSummary,
   Transaction,
   TransactionBudgetExclusionReason,
   TransactionBudgetOverride,
@@ -14,6 +15,15 @@ export type TransactionBudgetTreatment = {
   includeInSafeToSpendImpact: boolean;
   budgetCategory: string | null;
   exclusionReason: TransactionBudgetExclusionReason | null;
+  source: "deterministic" | "user";
+};
+
+export type CreditCardTransactionEstimateTreatment = {
+  transactionId: string;
+  includeInEstimate: boolean;
+  direction: "increase" | "payment" | "refund" | "fee" | "ignore";
+  amount: number;
+  reason: string;
   source: "deterministic" | "user";
 };
 
@@ -37,6 +47,36 @@ function textFor(transaction: Transaction, account?: Account | null) {
 
 function isExpense(transaction: Transaction) {
   return transaction.amount < 0 && transaction.kind === "expense";
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function normaliseText(value: string | null | undefined) {
+  return value?.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() ?? "";
+}
+
+export function isCreditCardAccount(account: Account | null | undefined) {
+  return Boolean(
+    account &&
+      (account.type === "credit_card" ||
+        account.subtype === "credit_card" ||
+        account.subtype === "charge_card" ||
+        account.purpose === "credit_card"),
+  );
+}
+
+export function isAmexAccount(account: Account | null | undefined) {
+  if (!account) return false;
+  const cardTyped =
+    account.type === "credit_card" ||
+    account.subtype === "credit_card" ||
+    account.subtype === "charge_card";
+  const text = normaliseText(
+    `${account.institutionName} ${account.name} ${account.officialName} ${account.provider}`,
+  );
+  return cardTyped && (text.includes("amex") || text.includes("american express"));
 }
 
 function isBillLike(text: string) {
@@ -140,6 +180,7 @@ export function createTransactionBudgetOverride(input: {
       | "includeInMonthlyBudget"
       | "includeInSpendingSummaries"
       | "includeInSafeToSpendImpact"
+      | "includeInCreditCardBalanceEstimate"
       | "budgetCategory"
       | "exclusionReason"
       | "userNote"
@@ -168,12 +209,288 @@ export function createTransactionBudgetOverride(input: {
       input.changes.includeInSpendingSummaries ?? defaults.includeInSpendingSummaries,
     includeInSafeToSpendImpact:
       input.changes.includeInSafeToSpendImpact ?? defaults.includeInSafeToSpendImpact,
+    includeInCreditCardBalanceEstimate:
+      input.changes.includeInCreditCardBalanceEstimate ??
+      input.existing?.includeInCreditCardBalanceEstimate,
     budgetCategory: input.changes.budgetCategory ?? defaults.budgetCategory,
     exclusionReason: input.changes.exclusionReason ?? defaults.exclusionReason,
     userNote: input.changes.userNote ?? input.existing?.userNote ?? null,
     createdAt: input.existing?.createdAt ?? now,
     updatedAt: now,
   };
+}
+
+export function getCreditCardTransactionEstimateTreatment(
+  transaction: Transaction,
+  account?: Account | null,
+  override?: TransactionBudgetOverride | null,
+): CreditCardTransactionEstimateTreatment {
+  if (!isCreditCardAccount(account)) {
+    return {
+      transactionId: transaction.id,
+      includeInEstimate: false,
+      direction: "ignore",
+      amount: 0,
+      reason: "not_credit_card_account",
+      source: override?.includeInCreditCardBalanceEstimate === false ? "user" : "deterministic",
+    };
+  }
+
+  const text = textFor(transaction, account);
+  const pending = transaction.pending || transaction.providerStatus === "pending";
+  const deleted = transaction.providerStatus === "deleted";
+  const duplicate = text.includes("duplicate") || transaction.flags.includes("duplicate");
+  const userExcluded = override?.includeInCreditCardBalanceEstimate === false;
+
+  if (pending || deleted || duplicate || userExcluded) {
+    return {
+      transactionId: transaction.id,
+      includeInEstimate: false,
+      direction: "ignore",
+      amount: 0,
+      reason: userExcluded
+        ? "manual_exclusion"
+        : pending
+          ? "pending"
+          : deleted
+            ? "provider_deleted"
+            : "duplicate",
+      source: userExcluded ? "user" : "deterministic",
+    };
+  }
+
+  const amount = Math.abs(transaction.amount);
+
+  if (transaction.amount < 0) {
+    const fee =
+      text.includes("fee") ||
+      text.includes("interest") ||
+      text.includes("cash advance") ||
+      text.includes("cash withdrawal");
+
+    return {
+      transactionId: transaction.id,
+      includeInEstimate: true,
+      direction: fee ? "fee" : "increase",
+      amount,
+      reason: fee ? "fee_or_interest" : "purchase",
+      source: override?.includeInCreditCardBalanceEstimate === true ? "user" : "deterministic",
+    };
+  }
+
+  if (transaction.amount > 0) {
+    const refund =
+      text.includes("refund") ||
+      text.includes("chargeback") ||
+      text.includes("statement credit") ||
+      (text.includes("credit") && !text.includes("credit card"));
+
+    return {
+      transactionId: transaction.id,
+      includeInEstimate: true,
+      direction: refund ? "refund" : "payment",
+      amount,
+      reason: refund ? "refund_or_credit" : "payment",
+      source: override?.includeInCreditCardBalanceEstimate === true ? "user" : "deterministic",
+    };
+  }
+
+  return {
+    transactionId: transaction.id,
+    includeInEstimate: true,
+    direction: "ignore",
+    amount: 0,
+    reason: "zero_amount",
+    source: override?.includeInCreditCardBalanceEstimate === true ? "user" : "deterministic",
+  };
+}
+
+function providerCurrentLiability(account: Account) {
+  if (
+    account.balanceAvailable === false ||
+    account.balanceSource === "statement" ||
+    account.balanceSource === "unavailable"
+  ) {
+    return null;
+  }
+
+  if (account.currentBalance !== null && account.currentBalance !== undefined) {
+    return Math.abs(Number(account.currentBalance));
+  }
+
+  return Math.abs(Math.min(account.balance, 0));
+}
+
+function providerStatementLiability(account: Account) {
+  if (account.statementBalance !== null && account.statementBalance !== undefined) {
+    return Math.abs(Number(account.statementBalance));
+  }
+
+  if (account.balanceSource === "statement" && account.balanceAvailable !== false) {
+    return Math.abs(account.balance);
+  }
+
+  return null;
+}
+
+export function calculateCreditCardBalanceSummary(input: {
+  account: Account;
+  transactions: Transaction[];
+  overrides?: TransactionBudgetOverride[];
+  calculatedAt?: string;
+}): CreditCardBalanceSummary {
+  const { account } = input;
+  const calculatedAt = input.calculatedAt ?? new Date().toISOString();
+  const providerCurrentBalance = providerCurrentLiability(account);
+  const providerStatementBalance = providerStatementLiability(account);
+  const baseSummary = {
+    accountId: account.id,
+    providerCurrentBalance,
+    providerStatementBalance,
+    statementStartDate: account.statementStartDate ?? null,
+    statementEndDate: account.statementEndDate ?? null,
+    paymentDueDate: account.paymentDueDate ?? null,
+    manualAnchorBalance: account.manualAnchorBalance ?? null,
+    manualAnchorDate: account.manualAnchorDate ?? null,
+    postStatementPurchases: 0,
+    postStatementPayments: 0,
+    postStatementRefunds: 0,
+    postStatementFees: 0,
+    transactionsIncludedCount: 0,
+    transactionsExcludedCount: 0,
+    calculatedAt,
+  };
+
+  if (providerCurrentBalance !== null) {
+    return {
+      ...baseSummary,
+      estimatedCurrentBalance: null,
+      balanceUsedForPlanning: roundMoney(providerCurrentBalance),
+      balanceSource: "provider_current",
+      confidence: "confirmed",
+    };
+  }
+
+  const hasStatementAnchor =
+    providerStatementBalance !== null && Boolean(account.statementEndDate);
+  const hasManualAnchor =
+    !hasStatementAnchor &&
+    account.manualAnchorBalance !== null &&
+    account.manualAnchorBalance !== undefined &&
+    Boolean(account.manualAnchorDate);
+  const anchorBalance = hasStatementAnchor
+    ? providerStatementBalance
+    : hasManualAnchor
+      ? Math.abs(Number(account.manualAnchorBalance))
+      : null;
+  const anchorDate = hasStatementAnchor ? account.statementEndDate : account.manualAnchorDate;
+
+  if (anchorBalance === null || !anchorDate) {
+    return {
+      ...baseSummary,
+      estimatedCurrentBalance: null,
+      balanceUsedForPlanning: null,
+      balanceSource: "unavailable",
+      confidence: "unavailable",
+    };
+  }
+
+  const overrideByTransactionId = new Map(
+    (input.overrides ?? []).map((override) => [override.transactionId, override]),
+  );
+  let purchases = 0;
+  let payments = 0;
+  let refunds = 0;
+  let fees = 0;
+  let included = 0;
+  let excluded = 0;
+
+  input.transactions
+    .filter((transaction) => transaction.accountId === account.id && transaction.date > anchorDate)
+    .forEach((transaction) => {
+      const treatment = getCreditCardTransactionEstimateTreatment(
+        transaction,
+        account,
+        overrideByTransactionId.get(transaction.id) ?? null,
+      );
+
+      if (!treatment.includeInEstimate) {
+        excluded += 1;
+        return;
+      }
+
+      included += 1;
+      if (treatment.direction === "fee") {
+        fees += treatment.amount;
+      } else if (treatment.direction === "increase") {
+        purchases += treatment.amount;
+      } else if (treatment.direction === "payment") {
+        payments += treatment.amount;
+      } else if (treatment.direction === "refund") {
+        refunds += treatment.amount;
+      }
+    });
+
+  const estimated = Math.max(0, roundMoney(anchorBalance + purchases + fees - payments - refunds));
+
+  return {
+    ...baseSummary,
+    postStatementPurchases: roundMoney(purchases),
+    postStatementPayments: roundMoney(payments),
+    postStatementRefunds: roundMoney(refunds),
+    postStatementFees: roundMoney(fees),
+    transactionsIncludedCount: included,
+    transactionsExcludedCount: excluded,
+    estimatedCurrentBalance: estimated,
+    balanceUsedForPlanning: estimated,
+    balanceSource: hasStatementAnchor
+      ? "provider_statement_estimate"
+      : "manual_anchor_estimate",
+    confidence: "estimated",
+  };
+}
+
+export function buildCreditCardBalanceSummaries(
+  accounts: Account[],
+  transactions: Transaction[],
+  overrides: TransactionBudgetOverride[] = [],
+  calculatedAt?: string,
+) {
+  return accounts
+    .filter((account) => account.status === "active" && isCreditCardAccount(account))
+    .map((account) =>
+      calculateCreditCardBalanceSummary({ account, transactions, overrides, calculatedAt }),
+    );
+}
+
+export function applyCreditCardPlanningBalances(
+  accounts: Account[],
+  summaries: CreditCardBalanceSummary[],
+) {
+  const summaryByAccountId = new Map(summaries.map((summary) => [summary.accountId, summary]));
+
+  return accounts.map((account) => {
+    const summary = summaryByAccountId.get(account.id);
+    if (!summary || summary.balanceUsedForPlanning === null) {
+      return account;
+    }
+
+    return {
+      ...account,
+      balance: -summary.balanceUsedForPlanning,
+      balanceAvailable: summary.confidence !== "unavailable",
+      balanceSource:
+        summary.balanceSource === "provider_current"
+          ? "current"
+          : summary.balanceSource === "unavailable"
+            ? "unavailable"
+            : "statement",
+      currentBalance:
+        summary.balanceSource === "provider_current"
+          ? summary.balanceUsedForPlanning
+          : account.currentBalance ?? null,
+    } satisfies Account;
+  });
 }
 
 export function filterTransactionsForBudget(
@@ -247,10 +564,14 @@ export function exclusionCountsByReason(
   return counts;
 }
 
-export function amexFundingSummary(accounts: Account[]) {
+export function amexFundingSummary(
+  accounts: Account[],
+  transactions: Transaction[] = [],
+  overrides: TransactionBudgetOverride[] = [],
+  calculatedAt?: string,
+) {
   const amexLiabilities = accounts.filter((account) => {
-    const text = `${account.institutionName} ${account.name} ${account.officialName}`.toLowerCase();
-    return account.type === "credit_card" && (text.includes("amex") || text.includes("american express"));
+    return isAmexAccount(account);
   });
   const amexPockets = accounts.filter(
     (account) =>
@@ -260,24 +581,33 @@ export function amexFundingSummary(accounts: Account[]) {
   );
   const pocketBalance = amexPockets.reduce((total, account) => total + account.balance, 0);
   const liability = amexLiabilities[0] ?? null;
-  const balanceKnown = liability ? liability.balanceAvailable !== false : false;
-  const liabilityBalance =
-    liability && balanceKnown ? Math.abs(Math.min(liability.balance, 0)) : null;
-  const balanceSource = liability?.balanceSource ?? (balanceKnown ? "current" : "unavailable");
+  const balanceSummary = liability
+    ? calculateCreditCardBalanceSummary({
+        account: liability,
+        transactions,
+        overrides,
+        calculatedAt,
+      })
+    : null;
+  const liabilityBalance = balanceSummary?.balanceUsedForPlanning ?? null;
+  const balanceKnown = liabilityBalance !== null;
 
   return {
     liabilityAccountId: liability?.id ?? null,
     liabilityName: liability?.name ?? "Amex",
     balanceKnown,
-    balanceSource,
+    balanceSource: balanceSummary?.balanceSource ?? "unavailable",
+    confidence: balanceSummary?.confidence ?? "unavailable",
     liabilityBalance,
     balanceUnavailableReason: liability?.balanceUnavailableReason ?? null,
     paymentDueDate: liability?.paymentDueDate ?? null,
     statementStartDate: liability?.statementStartDate ?? null,
     statementEndDate: liability?.statementEndDate ?? null,
+    balanceSummary,
     linkedPocketBalance: pocketBalance,
     fundedAmount: liabilityBalance === null ? null : Math.min(liabilityBalance, pocketBalance),
     unfundedAmount: liabilityBalance === null ? null : Math.max(liabilityBalance - pocketBalance, 0),
+    excessReserved: liabilityBalance === null ? null : Math.max(pocketBalance - liabilityBalance, 0),
     pocketAccountIds: amexPockets.map((account) => account.id),
   };
 }

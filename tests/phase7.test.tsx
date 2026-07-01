@@ -452,9 +452,9 @@ describe("phase 7 Moneyhub sandbox proof of concept", () => {
     );
 
     expect(html).toContain("Purpose");
-    expect(html).toContain("Statement balance");
+    expect(html).toContain("Estimated current balance");
     expect(html).not.toContain("Current balance: £321.45");
-    expect(html).toContain("Current balance unavailable from provider");
+    expect(html).toContain("Statement-derived estimate");
     expect(html).toContain("Payment due:");
     expect(html).toContain("Statement period:");
     expect(html).toContain("Available credit:");

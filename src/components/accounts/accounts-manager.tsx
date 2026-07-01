@@ -11,12 +11,15 @@ import type {
   Bill,
   ConnectionLifecycleStatus,
   SavingsGoal,
+  Transaction,
+  TransactionBudgetOverride,
 } from "@/lib/domain";
 import {
   calculateBillsAccountBalance,
   calculateCashflowAccountBalance,
   calculateSafeToSpendEligibleCash,
 } from "@/lib/finance";
+import { calculateCreditCardBalanceSummary } from "@/lib/finance-interpretation";
 import { formatCurrency, formatDateShort } from "@/lib/format";
 
 const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warning" | "risk"> = {
@@ -45,21 +48,29 @@ function accountLifecycleStatus(account: Account): ConnectionLifecycleStatus {
   return account.syncStatus;
 }
 
-function cardBalanceLabel(account: Account) {
+function cardBalanceLabel(account: Account, summary?: ReturnType<typeof calculateCreditCardBalanceSummary>) {
   if (account.type !== "credit_card") {
     return "Balance";
   }
 
-  if (account.balanceAvailable === false || account.balanceSource === "unavailable") {
+  if (!summary || summary.balanceSource === "unavailable") {
     return "Balance unavailable";
   }
 
-  return account.balanceSource === "statement" ? "Statement balance" : "Current balance";
+  if (summary.balanceSource === "provider_current") return "Provider current balance";
+  if (summary.balanceSource === "provider_statement_estimate") {
+    return "Estimated current balance";
+  }
+  return "Manual-anchor estimate";
 }
 
-function cardBalanceValue(account: Account) {
-  if (account.type === "credit_card" && account.balanceAvailable === false) {
-    return "Balance unavailable from provider";
+function cardBalanceValue(account: Account, summary?: ReturnType<typeof calculateCreditCardBalanceSummary>) {
+  if (account.type === "credit_card") {
+    if (!summary || summary.balanceUsedForPlanning === null) {
+      return "Balance unavailable from provider";
+    }
+
+    return formatCurrency(summary.balanceUsedForPlanning);
   }
 
   return formatCurrency(Math.abs(account.balance));
@@ -69,11 +80,15 @@ export function AccountsManager({
   accounts,
   bills,
   savingsGoals,
+  transactions = [],
+  transactionBudgetOverrides = [],
   persistenceConfigured,
 }: {
   accounts: Account[];
   bills: Bill[];
   savingsGoals: SavingsGoal[];
+  transactions?: Transaction[];
+  transactionBudgetOverrides?: TransactionBudgetOverride[];
   persistenceConfigured: boolean;
 }) {
   const [accountDrafts, setAccountDrafts] = useState(accounts);
@@ -113,6 +128,9 @@ export function AccountsManager({
         linkedLiabilityAccountId: account.linkedLiabilityAccountId ?? null,
         overdraftLimit: account.overdraftLimit ?? null,
         overdraftRepaymentTarget: account.overdraftRepaymentTarget ?? null,
+        manualAnchorBalance: account.manualAnchorBalance ?? null,
+        manualAnchorDate: account.manualAnchorDate ?? null,
+        manualAnchorNote: account.manualAnchorNote ?? null,
       })
         .then(() => {
           setMessage(
@@ -172,6 +190,14 @@ export function AccountsManager({
         {accountDrafts.map((account) => {
           const displaySyncStatus = accountLifecycleStatus(account);
           const accountBills = bills.filter((bill) => bill.accountId === account.id);
+          const creditCardBalance =
+            account.type === "credit_card"
+              ? calculateCreditCardBalanceSummary({
+                  account,
+                  transactions,
+                  overrides: transactionBudgetOverrides,
+                })
+              : null;
 
           return (
             <article
@@ -192,15 +218,36 @@ export function AccountsManager({
                     {account.mask ? ` - ${account.mask}` : ""}
                   </p>
                   <p className="mt-2 text-sm text-ink/70">
-                    {cardBalanceLabel(account)}:{" "}
+                    {cardBalanceLabel(account, creditCardBalance ?? undefined)}:{" "}
                     <span className="font-semibold text-ink">
-                      {cardBalanceValue(account)}
+                      {cardBalanceValue(account, creditCardBalance ?? undefined)}
                     </span>
                   </p>
                   {account.type === "credit_card" ? (
                     <div className="mt-2 space-y-1 text-sm text-ink/60">
-                      {account.balanceSource === "statement" ? (
-                        <p>Current balance unavailable from provider.</p>
+                      {creditCardBalance?.balanceSource === "provider_statement_estimate" ? (
+                        <p>
+                          Statement-derived estimate:{" "}
+                          {formatCurrency(creditCardBalance.providerStatementBalance ?? 0)} statement
+                          balance + {formatCurrency(creditCardBalance.postStatementPurchases)}
+                          purchases + {formatCurrency(creditCardBalance.postStatementFees)} fees -
+                          {formatCurrency(creditCardBalance.postStatementPayments)} payments -
+                          {formatCurrency(creditCardBalance.postStatementRefunds)} refunds.
+                        </p>
+                      ) : null}
+                      {creditCardBalance?.balanceSource === "manual_anchor_estimate" ? (
+                        <p>
+                          Estimated from manual balance updated on{" "}
+                          {creditCardBalance.manualAnchorDate
+                            ? formatDateShort(creditCardBalance.manualAnchorDate.slice(0, 10))
+                            : "unknown date"}
+                          .
+                        </p>
+                      ) : null}
+                      {creditCardBalance?.balanceSource === "unavailable" ? (
+                        <p>
+                          Enter Amex balance manually to start estimating from synced transactions.
+                        </p>
                       ) : null}
                       {account.paymentDueDate ? (
                         <p>Payment due: {formatDateShort(account.paymentDueDate.slice(0, 10))}</p>
@@ -317,6 +364,61 @@ export function AccountsManager({
                   </label>
                 </div>
               </div>
+
+              {account.type === "credit_card" ? (
+                <div className="mt-5 rounded-lg border border-line bg-paper p-4">
+                  <p className="text-sm font-semibold text-ink">Manual card balance anchor</p>
+                  <p className="mt-1 text-xs text-ink/55">
+                    Used only when provider current and statement balances are unavailable. This does
+                    not modify raw provider data.
+                  </p>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <label className="text-sm text-ink/70">
+                      Anchor balance
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
+                        value={account.manualAnchorBalance ?? ""}
+                        onChange={(event) =>
+                          updateAccount(account.id, {
+                            manualAnchorBalance: event.target.value
+                              ? Math.max(Number(event.target.value), 0)
+                              : null,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="text-sm text-ink/70">
+                      Anchor date
+                      <input
+                        type="date"
+                        className="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
+                        value={account.manualAnchorDate ?? ""}
+                        onChange={(event) =>
+                          updateAccount(account.id, {
+                            manualAnchorDate: event.target.value || null,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="text-sm text-ink/70">
+                      Note
+                      <input
+                        className="mt-1 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink"
+                        value={account.manualAnchorNote ?? ""}
+                        placeholder="Optional note"
+                        onChange={(event) =>
+                          updateAccount(account.id, {
+                            manualAnchorNote: event.target.value.trim() || null,
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="mt-5 grid gap-3 md:grid-cols-3">
                 <label className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper px-4 py-3 text-sm text-ink/70">

@@ -74,6 +74,9 @@ describe("phase 4 persistence foundation", () => {
       linkedLiabilityAccountId: null,
       overdraftLimit: null,
       overdraftRepaymentTarget: null,
+      manualAnchorBalance: null,
+      manualAnchorDate: null,
+      manualAnchorNote: null,
     });
   });
 

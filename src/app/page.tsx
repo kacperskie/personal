@@ -139,11 +139,13 @@ export default async function DashboardPage() {
     item.liabilityName.toLowerCase().includes("amex"),
   );
   const amexFundingLabel =
-    amexFunding?.balanceSource === "statement"
-      ? "Amex statement balance funded"
-      : amexFunding?.balanceSource === "current"
-        ? "Amex current balance funded"
-        : "Amex balance unavailable";
+    amexFunding?.balanceSource === "provider_current"
+      ? "Amex provider current balance funded"
+      : amexFunding?.balanceSource === "provider_statement_estimate"
+        ? "Amex estimated balance funded"
+        : amexFunding?.balanceSource === "manual_anchor_estimate"
+          ? "Amex manual estimate funded"
+          : "Amex balance unavailable";
 
   return (
     <div className="space-y-6">
@@ -252,11 +254,9 @@ export default async function DashboardPage() {
             detail={
               amexFunding.balanceKnown
                 ? `${formatCurrency(amexFunding.unfundedBalance)} ${
-                    amexFunding.balanceSource === "statement"
-                      ? "statement balance"
-                      : "balance"
-                  } unfunded after reserved pocket cash`
-                : "Cannot calculate funded exposure until TrueLayer returns the card balance"
+                    amexFunding.confidence === "estimated" ? "estimated" : "confirmed"
+                  } balance unfunded after reserved pocket cash`
+                : "Cannot calculate funded exposure until the balance is known or manually anchored"
             }
             icon={WalletCards}
             tone={!amexFunding.balanceKnown || amexFunding.unfundedBalance > 0 ? "saffron" : "moss"}
@@ -462,17 +462,20 @@ export default async function DashboardPage() {
             </dl>
           </div>
         </div>
-        {dashboard.diagnostics.creditCardLiabilities.some(
-          (card) => !card.balanceKnown || card.balanceSource === "statement",
-        ) ? (
+        {dashboard.diagnostics.creditCardLiabilities.some((card) => card.warning) ? (
           <div className="mt-4 rounded-lg border border-saffron/30 bg-saffron/10 p-4 text-sm text-ink/75">
             {dashboard.diagnostics.creditCardLiabilities
-              .filter((card) => !card.balanceKnown || card.balanceSource === "statement")
+              .filter((card) => card.warning)
               .map((card) => (
                 <p key={card.id}>
-                  {card.balanceKnown
-                    ? `${card.name}: current balance unavailable from provider; using statement balance for planning.`
-                    : `${card.name}: balance unavailable from provider. The dashboard is not treating this as a confirmed GBP 0 liability.`}
+                  {card.name}: {card.warning}
+                  {card.balanceSource === "provider_statement_estimate"
+                    ? ` using ${formatCurrency(card.providerStatementBalance ?? 0)} statement balance + ${formatCurrency(
+                        card.postStatementPurchases,
+                      )} purchases - ${formatCurrency(
+                        card.postStatementPayments + card.postStatementRefunds,
+                      )} payments/refunds.`
+                    : ""}
                 </p>
               ))}
           </div>

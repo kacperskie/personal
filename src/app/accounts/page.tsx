@@ -8,16 +8,21 @@ import {
   getBankConnections,
   getBills,
   getSavingsGoals,
+  getTransactionBudgetOverrides,
+  getTransactions,
 } from "@/lib/repositories/finance-repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountsPage() {
-  const [accounts, bills, savingsGoals, connections] = await Promise.all([
+  const [accounts, bills, savingsGoals, connections, transactions, transactionBudgetOverrides] =
+    await Promise.all([
     getAccounts(),
     getBills(),
     getSavingsGoals(),
     getBankConnections(),
+    getTransactions(),
+    getTransactionBudgetOverrides(),
   ]);
   const liveMode = isLiveTrueLayerMode();
   const { live, sandbox } = partitionAccounts(accounts, connections);
@@ -47,6 +52,8 @@ export default async function AccountsPage() {
         accounts={visibleAccounts}
         bills={bills}
         savingsGoals={savingsGoals}
+        transactions={transactions}
+        transactionBudgetOverrides={transactionBudgetOverrides}
         persistenceConfigured={isFirebaseBackend()}
       />
     </div>

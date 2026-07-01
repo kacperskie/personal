@@ -18,7 +18,9 @@ import {
   getTransactions,
 } from "@/lib/repositories/finance-repository";
 import {
+  getCreditCardTransactionEstimateTreatment,
   getTransactionBudgetTreatment,
+  type CreditCardTransactionEstimateTreatment,
   type TransactionBudgetTreatment,
 } from "@/lib/finance-interpretation";
 import { financeCategories } from "@/lib/transaction-intelligence";
@@ -46,6 +48,11 @@ export default async function TransactionsPage() {
     transaction,
     account: accountById.get(transaction.accountId) ?? null,
     treatment: getTransactionBudgetTreatment(
+      transaction,
+      accountById.get(transaction.accountId) ?? null,
+      overrideByTransactionId.get(transaction.id) ?? null,
+    ),
+    creditCardEstimateTreatment: getCreditCardTransactionEstimateTreatment(
       transaction,
       accountById.get(transaction.accountId) ?? null,
       overrideByTransactionId.get(transaction.id) ?? null,
@@ -140,7 +147,7 @@ export default async function TransactionsPage() {
               No transactions are available yet.
             </div>
           ) : null}
-          {recentTransactions.map(({ transaction, account, treatment }) => (
+          {recentTransactions.map(({ transaction, account, treatment, creditCardEstimateTreatment }) => (
             <article key={transaction.id} className="rounded-lg border border-line bg-paper p-4">
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(520px,1.2fr)]">
                 <div>
@@ -152,6 +159,9 @@ export default async function TransactionsPage() {
                     {account?.name ?? "Unknown account"} - {formatCurrency(transaction.amount)}
                   </p>
                   <BudgetTreatmentSummary treatment={treatment} />
+                  {creditCardEstimateTreatment.reason !== "not_credit_card_account" ? (
+                    <CreditCardEstimateSummary treatment={creditCardEstimateTreatment} />
+                  ) : null}
                   <div className="mt-3 flex flex-wrap gap-2">
                     {quickActions.slice(0, 6).map(([value, label]) => (
                       <form
@@ -188,6 +198,13 @@ export default async function TransactionsPage() {
                       label="Safe-to-spend"
                       checked={treatment.includeInSafeToSpendImpact}
                     />
+                    {creditCardEstimateTreatment.reason !== "not_credit_card_account" ? (
+                      <BudgetCheckbox
+                        name="includeInCreditCardBalanceEstimate"
+                        label="Card estimate"
+                        checked={creditCardEstimateTreatment.includeInEstimate}
+                      />
+                    ) : null}
                   </div>
                   <div className="grid gap-2 sm:grid-cols-3">
                     <select
@@ -353,6 +370,23 @@ function BudgetTreatmentSummary({ treatment }: { treatment: TransactionBudgetTre
       {treatment.includeInMonthlyBudget ? "included" : "excluded"} -{" "}
       {treatment.source === "user" ? "manual override" : "deterministic rule"}
       {treatment.exclusionReason ? ` (${treatment.exclusionReason.replaceAll("_", " ")})` : ""}
+    </p>
+  );
+}
+
+function CreditCardEstimateSummary({
+  treatment,
+}: {
+  treatment: CreditCardTransactionEstimateTreatment;
+}) {
+  return (
+    <p className="mt-1 text-xs text-ink/55">
+      Card balance estimate {treatment.includeInEstimate ? "includes" : "excludes"} this
+      transaction
+      {treatment.includeInEstimate
+        ? ` as ${treatment.direction.replaceAll("_", " ")}`
+        : ` (${treatment.reason.replaceAll("_", " ")})`}
+      {treatment.source === "user" ? " - manual override" : ""}
     </p>
   );
 }
