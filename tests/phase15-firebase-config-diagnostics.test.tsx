@@ -97,11 +97,13 @@ describe("phase 15 Firebase public config diagnostics", () => {
     expect(html).not.toContain("leaky-api-key-should-not-appear");
   });
 
-  it("renders the safe diagnostic on /settings/system-readiness", () => {
+  it("renders the safe diagnostic on /settings/system-readiness", async () => {
     vi.stubEnv("BACKEND_PROVIDER", "firebase");
     vi.stubEnv("NEXT_PUBLIC_FIREBASE_API_KEY", "");
 
-    const html = renderToStaticMarkup(<SystemReadinessPage />);
+    // SystemReadinessPage is an async server component (it awaits the Admin init
+    // test); resolve it before rendering the returned element tree.
+    const html = renderToStaticMarkup(await SystemReadinessPage());
 
     for (const key of PUBLIC_KEYS) {
       expect(html).toContain(key);

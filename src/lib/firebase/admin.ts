@@ -4,6 +4,7 @@ import type { App } from "firebase-admin/app";
 import type { Auth } from "firebase-admin/auth";
 import type { Firestore } from "firebase-admin/firestore";
 import { getFirebaseAdminEnv } from "@/lib/firebase/env";
+import { logServerEvent } from "@/lib/observability/server-logger";
 
 /**
  * Firebase Admin must never be imported at module top level. `firebase-admin/auth`
@@ -22,6 +23,15 @@ export async function createFirebaseAdminApp(): Promise<App | null> {
   const env = getFirebaseAdminEnv();
 
   if (!env) {
+    // Non-secret signal: one or more of FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL
+    // / FIREBASE_PRIVATE_KEY is absent (or the key normalised to empty) at runtime.
+    logServerEvent({
+      level: "error",
+      event: "auth_event",
+      message:
+        "Firebase Admin credentials missing or incomplete at runtime; session cookies unavailable.",
+      metadata: { code: "firebase_admin_env_missing" },
+    });
     return null;
   }
 
@@ -39,7 +49,26 @@ export async function createFirebaseAdminApp(): Promise<App | null> {
         privateKey: env.privateKey,
       }),
     });
-  } catch {
+  } catch (error) {
+    // Env is present but initialisation threw. Classify without ever logging key
+    // material: we log only a code and the error's class name (never its message,
+    // which is redacted-through the logger regardless). A cert/PEM parse failure
+    // is the prime suspect for a malformed FIREBASE_PRIVATE_KEY.
+    const errorName = error instanceof Error ? error.name : "UnknownError";
+    const looksLikeKeyProblem =
+      error instanceof Error &&
+      /private key|pem|decoder|asn1|der|secretorprivatekey/i.test(error.message);
+    logServerEvent({
+      level: "error",
+      event: "auth_event",
+      message: "Firebase Admin initialisation failed; session cookies unavailable.",
+      metadata: {
+        code: looksLikeKeyProblem
+          ? "firebase_admin_cert_parse_failure"
+          : "firebase_admin_init_failure",
+        errorName,
+      },
+    });
     return null;
   }
 }

@@ -281,14 +281,18 @@ describe("phase 10 Web Push and scheduled notifications", () => {
     expect(html).toContain("Test notification");
   });
 
-  it("adds Vercel cron configuration", () => {
+  it("does not define live Vercel crons (diagnostic control deploy)", () => {
+    // For the Vercel control-test deploy, scheduled work is intentionally NOT
+    // wired via vercel.json: the every-6-hours schedule exceeds Vercel Hobby's
+    // once-daily cron limit (deploy error) and we do not want live scheduled
+    // work firing during a diagnostic. Netlify scheduled functions remain the
+    // scheduling mechanism for the Netlify host.
     const config = JSON.parse(fs.readFileSync(path.resolve("vercel.json"), "utf8")) as {
-      crons: Array<{ path: string }>;
+      crons?: Array<{ path: string }>;
     };
 
-    expect(config.crons.map((cron) => cron.path)).toContain("/api/notifications/scheduled");
-    expect(config.crons.map((cron) => cron.path)).toContain(
-      "/api/bank-connections/scheduled-sync",
-    );
+    expect(config.crons ?? []).toHaveLength(0);
+    expect(fs.existsSync(path.resolve("netlify/functions/scheduled-notifications.ts"))).toBe(true);
+    expect(fs.existsSync(path.resolve("netlify/functions/scheduled-bank-sync.ts"))).toBe(true);
   });
 });
