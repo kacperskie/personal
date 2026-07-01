@@ -45,6 +45,26 @@ function accountLifecycleStatus(account: Account): ConnectionLifecycleStatus {
   return account.syncStatus;
 }
 
+function cardBalanceLabel(account: Account) {
+  if (account.type !== "credit_card") {
+    return "Balance";
+  }
+
+  if (account.balanceAvailable === false || account.balanceSource === "unavailable") {
+    return "Balance unavailable";
+  }
+
+  return account.balanceSource === "statement" ? "Statement balance" : "Current balance";
+}
+
+function cardBalanceValue(account: Account) {
+  if (account.type === "credit_card" && account.balanceAvailable === false) {
+    return "Balance unavailable from provider";
+  }
+
+  return formatCurrency(Math.abs(account.balance));
+}
+
 export function AccountsManager({
   accounts,
   bills,
@@ -172,14 +192,43 @@ export function AccountsManager({
                     {account.mask ? ` - ${account.mask}` : ""}
                   </p>
                   <p className="mt-2 text-sm text-ink/70">
-                    Balance:{" "}
+                    {cardBalanceLabel(account)}:{" "}
                     <span className="font-semibold text-ink">
-                      {formatCurrency(account.balance)}
+                      {cardBalanceValue(account)}
                     </span>
-                    {account.availableBalance !== null
-                      ? ` - Available: ${formatCurrency(account.availableBalance)}`
-                      : ""}
                   </p>
+                  {account.type === "credit_card" ? (
+                    <div className="mt-2 space-y-1 text-sm text-ink/60">
+                      {account.balanceSource === "statement" ? (
+                        <p>Current balance unavailable from provider.</p>
+                      ) : null}
+                      {account.paymentDueDate ? (
+                        <p>Payment due: {formatDateShort(account.paymentDueDate.slice(0, 10))}</p>
+                      ) : null}
+                      {account.statementStartDate || account.statementEndDate ? (
+                        <p>
+                          Statement period:{" "}
+                          {account.statementStartDate
+                            ? formatDateShort(account.statementStartDate.slice(0, 10))
+                            : "Unknown"}{" "}
+                          to{" "}
+                          {account.statementEndDate
+                            ? formatDateShort(account.statementEndDate.slice(0, 10))
+                            : "Unknown"}
+                        </p>
+                      ) : null}
+                      {account.availableBalance !== null ? (
+                        <p>
+                          Available credit: {formatCurrency(account.availableBalance)} (not
+                          spendable cash)
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : account.availableBalance !== null ? (
+                    <p className="mt-1 text-sm text-ink/60">
+                      Available: {formatCurrency(account.availableBalance)}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2 xl:w-[520px]">

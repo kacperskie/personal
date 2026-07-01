@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AccountsManager } from "../src/components/accounts/accounts-manager";
 import { TransactionsExplorer } from "../src/components/transactions/transactions-explorer";
 import type {
   Account,
@@ -397,6 +398,67 @@ describe("phase 7 Moneyhub sandbox proof of concept", () => {
     expect(html).toContain("FlexDirect");
     expect(html).toContain("Nationwide");
     expect(html).toContain("Groceries");
+  });
+
+  it("renders Amex statement balance metadata without exposing available credit as cash", () => {
+    const amex: Account = {
+      id: "acct_amex_statement",
+      userId: "user_test",
+      providerConnectionId: "conn_amex",
+      providerAccountId: "card_amex",
+      institutionName: "American Express",
+      institutionId: "amex",
+      name: "Amex Platinum Cashback Credit Card",
+      officialName: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      currency: "GBP",
+      balance: -321.45,
+      balanceAvailable: true,
+      balanceSource: "statement",
+      currentBalance: null,
+      statementBalance: 321.45,
+      paymentDueDate: "2026-07-21",
+      statementStartDate: "2026-06-01",
+      statementEndDate: "2026-06-30",
+      availableBalance: 1200,
+      creditLimit: 1500,
+      mask: "1234",
+      purpose: "credit_card",
+      accountRole: "credit",
+      includeInCashflow: true,
+      includeInNetWorth: true,
+      includeInSafeToSpend: false,
+      isSpendingAccount: false,
+      isBillsAccount: false,
+      isSavingsAccount: false,
+      linkedGoalIds: [],
+      syncStatus: "connected",
+      lastSyncedAt: "2026-06-30T09:00:00.000Z",
+      consentExpiresAt: "2026-09-30T09:00:00.000Z",
+      notes: null,
+      provider: "truelayer",
+      status: "active",
+      createdAt: "2026-06-30T09:00:00.000Z",
+      updatedAt: "2026-06-30T09:00:00.000Z",
+    };
+    const html = renderToStaticMarkup(
+      <AccountsManager
+        accounts={[amex]}
+        bills={[]}
+        savingsGoals={[]}
+        persistenceConfigured
+      />,
+    );
+
+    expect(html).toContain("Purpose");
+    expect(html).toContain("Statement balance");
+    expect(html).not.toContain("Current balance: £321.45");
+    expect(html).toContain("Current balance unavailable from provider");
+    expect(html).toContain("Payment due:");
+    expect(html).toContain("Statement period:");
+    expect(html).toContain("Available credit:");
+    expect(html).toContain("not spendable cash");
   });
 
   it("start route returns provider state from a mocked adapter", async () => {

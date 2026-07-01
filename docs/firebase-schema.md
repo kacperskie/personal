@@ -108,10 +108,20 @@ Reserved pockets may set `reservedFor` (for example `amex`) or
 counted as cash.
 
 Card accounts can also store provider balance-trust fields:
-`balanceAvailable`, `balanceUnavailableReason`, and `balanceDiagnostics`.
-These fields prevent unavailable card balances from being displayed as a
-confirmed GBP 0 liability. TrueLayer card balances are read from
-`/data/v1/cards/{card_id}/balance`, not the normal account balance endpoint.
+`balanceAvailable`, `balanceSource`, `balanceUnavailableReason`,
+`currentBalance`, `statementBalance`, `paymentDueDate`, `statementStartDate`,
+`statementEndDate`, and `balanceDiagnostics`. These fields prevent unavailable
+card balances from being displayed as a confirmed GBP 0 liability. TrueLayer
+card balances are read from `/data/v1/cards/{card_id}/balance`, not the normal
+account balance endpoint.
+
+For card providers such as American Express, `balanceSource=statement` means
+the stored `balance` is a statement-balance liability snapshot for planning. It
+must be labelled as statement balance in the UI and must not be described as a
+live/current balance. If neither current nor statement balance is available,
+`balanceAvailable=false` and the dashboard should warn instead of assuming
+zero debt. Available credit is stored only as non-spendable context and is never
+included in safe-to-spend.
 
 Transaction budget inclusion decisions are stored separately from synced
 provider transactions under `transactionBudgetOverrides`. Each override links to

@@ -263,13 +263,18 @@ export function amexFundingSummary(accounts: Account[]) {
   const balanceKnown = liability ? liability.balanceAvailable !== false : false;
   const liabilityBalance =
     liability && balanceKnown ? Math.abs(Math.min(liability.balance, 0)) : null;
+  const balanceSource = liability?.balanceSource ?? (balanceKnown ? "current" : "unavailable");
 
   return {
     liabilityAccountId: liability?.id ?? null,
     liabilityName: liability?.name ?? "Amex",
     balanceKnown,
+    balanceSource,
     liabilityBalance,
     balanceUnavailableReason: liability?.balanceUnavailableReason ?? null,
+    paymentDueDate: liability?.paymentDueDate ?? null,
+    statementStartDate: liability?.statementStartDate ?? null,
+    statementEndDate: liability?.statementEndDate ?? null,
     linkedPocketBalance: pocketBalance,
     fundedAmount: liabilityBalance === null ? null : Math.min(liabilityBalance, pocketBalance),
     unfundedAmount: liabilityBalance === null ? null : Math.max(liabilityBalance - pocketBalance, 0),

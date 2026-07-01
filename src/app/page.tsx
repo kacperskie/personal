@@ -138,6 +138,12 @@ export default async function DashboardPage() {
   const amexFunding = financeV2.creditCardFunding.find((item) =>
     item.liabilityName.toLowerCase().includes("amex"),
   );
+  const amexFundingLabel =
+    amexFunding?.balanceSource === "statement"
+      ? "Amex statement balance funded"
+      : amexFunding?.balanceSource === "current"
+        ? "Amex current balance funded"
+        : "Amex balance unavailable";
 
   return (
     <div className="space-y-6">
@@ -237,7 +243,7 @@ export default async function DashboardPage() {
         />
         {amexFunding ? (
           <StatCard
-            label={amexFunding.balanceKnown ? "Amex funded balance" : "Amex balance unavailable"}
+            label={amexFundingLabel}
             value={
               amexFunding.balanceKnown
                 ? formatCurrency(amexFunding.fundedBalance)
@@ -245,7 +251,11 @@ export default async function DashboardPage() {
             }
             detail={
               amexFunding.balanceKnown
-                ? `${formatCurrency(amexFunding.unfundedBalance)} unfunded after reserved pocket cash`
+                ? `${formatCurrency(amexFunding.unfundedBalance)} ${
+                    amexFunding.balanceSource === "statement"
+                      ? "statement balance"
+                      : "balance"
+                  } unfunded after reserved pocket cash`
                 : "Cannot calculate funded exposure until TrueLayer returns the card balance"
             }
             icon={WalletCards}
@@ -452,14 +462,17 @@ export default async function DashboardPage() {
             </dl>
           </div>
         </div>
-        {dashboard.diagnostics.creditCardLiabilities.some((card) => !card.balanceKnown) ? (
+        {dashboard.diagnostics.creditCardLiabilities.some(
+          (card) => !card.balanceKnown || card.balanceSource === "statement",
+        ) ? (
           <div className="mt-4 rounded-lg border border-saffron/30 bg-saffron/10 p-4 text-sm text-ink/75">
             {dashboard.diagnostics.creditCardLiabilities
-              .filter((card) => !card.balanceKnown)
+              .filter((card) => !card.balanceKnown || card.balanceSource === "statement")
               .map((card) => (
                 <p key={card.id}>
-                  {card.name}: balance unavailable from provider. The dashboard is not treating this
-                  as a confirmed GBP 0 liability.
+                  {card.balanceKnown
+                    ? `${card.name}: current balance unavailable from provider; using statement balance for planning.`
+                    : `${card.name}: balance unavailable from provider. The dashboard is not treating this as a confirmed GBP 0 liability.`}
                 </p>
               ))}
           </div>

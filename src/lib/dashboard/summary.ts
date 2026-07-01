@@ -121,6 +121,10 @@ export type CreditCardFundingSummary = {
   liabilityName: string;
   balance: number;
   balanceKnown: boolean;
+  balanceSource: Account["balanceSource"];
+  paymentDueDate: string | null;
+  statementStartDate: string | null;
+  statementEndDate: string | null;
   balanceUnavailableReason: string | null;
   reservedBalance: number;
   fundedBalance: number;
@@ -140,6 +144,7 @@ export type DashboardDiagnostics = {
     name: string;
     balance: number;
     balanceKnown: boolean;
+    balanceSource: Account["balanceSource"];
     warning: string | null;
   }>;
   overdraftAccounts: Array<{ id: string; name: string; overdraftUsed: number; overdraftLimit: number | null }>;
@@ -317,11 +322,22 @@ function dashboardWarnings(data: DashboardSummaryData) {
         : `${connection.institutionName} sync failed. Last known data is still shown.`,
     );
   const cardWarnings = data.accounts
-    .filter((account) => account.type === "credit_card" && account.balanceAvailable === false)
-    .map(
-      (account) =>
-        `${account.name} balance unavailable from provider; debt and Amex funding may be understated.`,
-    );
+    .filter((account) => account.type === "credit_card")
+    .flatMap((account) => {
+      if (account.balanceAvailable === false) {
+        return [
+          `${account.name} balance unavailable from provider; debt and Amex funding may be understated.`,
+        ];
+      }
+
+      if (account.balanceSource === "statement") {
+        return [
+          `${account.name} current balance is not available from provider; using statement balance if available.`,
+        ];
+      }
+
+      return [];
+    });
 
   return [...syncWarnings, ...cardWarnings];
 }
@@ -381,12 +397,12 @@ function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSumma
     )
     .map((liability) => {
       const liabilityText = `${liability.institutionName} ${liability.name} ${liability.officialName}`.toLowerCase();
+      const isAmex =
+        liabilityText.includes("amex") || liabilityText.includes("american express");
       const matchingReserved = reservedAccounts.filter(
         (account) =>
           account.linkedLiabilityAccountId === liability.id ||
-          (normaliseReservedFor(account.reservedFor) === "amex" &&
-            (liabilityText.includes("amex") ||
-              liabilityText.includes("american express"))),
+          (normaliseReservedFor(account.reservedFor) === "amex" && isAmex),
       );
       const balance = Math.abs(Math.min(liability.balance, 0));
       const balanceKnown = liability.balanceAvailable !== false;
@@ -398,15 +414,24 @@ function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSumma
         liabilityName: liability.name,
         balance,
         balanceKnown,
+        balanceSource: liability.balanceSource ?? (balanceKnown ? "current" : "unavailable"),
+        paymentDueDate: liability.paymentDueDate ?? null,
+        statementStartDate: liability.statementStartDate ?? null,
+        statementEndDate: liability.statementEndDate ?? null,
         balanceUnavailableReason: liability.balanceUnavailableReason ?? null,
         reservedBalance,
         fundedBalance,
         unfundedBalance: Math.max(balance - reservedBalance, 0),
         reservedAccountIds: matchingReserved.map((account) => account.id),
+        isAmex,
       };
     })
     .filter(
-      (summary) => summary.balance > 0 || summary.reservedBalance > 0 || !summary.balanceKnown,
+      (summary) =>
+        summary.balance > 0 ||
+        summary.reservedBalance > 0 ||
+        !summary.balanceKnown ||
+        summary.isAmex,
     );
 }
 
@@ -467,9 +492,12 @@ function dashboardDiagnostics(
         name: account.name,
         balance: Math.abs(Math.min(account.balance, 0)),
         balanceKnown: account.balanceAvailable !== false,
+        balanceSource: account.balanceSource ?? (account.balanceAvailable === false ? "unavailable" : "current"),
         warning:
           account.balanceAvailable === false
             ? "Balance unavailable from provider"
+            : account.balanceSource === "statement"
+              ? "Current balance unavailable; using statement balance"
             : null,
       })),
     overdraftAccounts: data.accounts

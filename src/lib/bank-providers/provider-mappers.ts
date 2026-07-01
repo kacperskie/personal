@@ -30,8 +30,13 @@ export type ProviderAccountPayload = {
   balance?: number | { amount?: number | { value?: number; currency?: string }; value?: number };
   balanceAvailable?: boolean;
   balanceUnavailableReason?: string | null;
+  balanceSource?: Account["balanceSource"];
+  currentBalance?: number | null;
+  statementBalance?: number | null;
+  paymentDueDate?: string | null;
+  statementStartDate?: string | null;
+  statementEndDate?: string | null;
   balanceDiagnostics?: Account["balanceDiagnostics"];
-  currentBalance?: number;
   availableBalance?: number;
   creditLimit?: number | null;
   currency?: string;
@@ -253,8 +258,11 @@ export function mapProviderAccountPayload(
   const hasBalance =
     payload.balanceAvailable ??
     valuePresent(payload.balance) ??
-    valuePresent(payload.currentBalance);
-  const rawBalance = numericValue(payload.balance ?? payload.currentBalance ?? 0);
+    valuePresent(payload.currentBalance) ??
+    valuePresent(payload.statementBalance);
+  const rawBalance = numericValue(
+    payload.balance ?? payload.currentBalance ?? payload.statementBalance ?? 0,
+  );
 
   return {
     providerConnectionId: connection.id,
@@ -281,6 +289,18 @@ export function mapProviderAccountPayload(
     balanceUnavailableReason: hasBalance
       ? null
       : payload.balanceUnavailableReason ?? "provider_balance_unavailable",
+    balanceSource:
+      payload.balanceSource ??
+      (valuePresent(payload.statementBalance) && !valuePresent(payload.currentBalance)
+        ? "statement"
+        : hasBalance
+          ? "current"
+          : "unavailable"),
+    currentBalance: payload.currentBalance ?? null,
+    statementBalance: payload.statementBalance ?? null,
+    paymentDueDate: payload.paymentDueDate ?? null,
+    statementStartDate: payload.statementStartDate ?? null,
+    statementEndDate: payload.statementEndDate ?? null,
     balanceDiagnostics: payload.balanceDiagnostics ?? null,
     availableBalance:
       payload.availableBalance === undefined ? null : Number(payload.availableBalance),
@@ -357,6 +377,12 @@ export function providerAccountToAccount(
     balance: account.balance,
     balanceAvailable: account.balanceAvailable ?? true,
     balanceUnavailableReason: account.balanceUnavailableReason ?? null,
+    balanceSource: account.balanceSource ?? (account.balanceAvailable === false ? "unavailable" : "current"),
+    currentBalance: account.currentBalance ?? null,
+    statementBalance: account.statementBalance ?? null,
+    paymentDueDate: account.paymentDueDate ?? null,
+    statementStartDate: account.statementStartDate ?? null,
+    statementEndDate: account.statementEndDate ?? null,
     balanceDiagnostics: account.balanceDiagnostics ?? null,
     availableBalance: account.availableBalance,
     creditLimit: account.creditLimit,

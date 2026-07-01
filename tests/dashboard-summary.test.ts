@@ -402,6 +402,121 @@ describe("dashboard summary", () => {
     });
   });
 
+  it("uses Amex statement balance for planning and labels current balance unavailable", () => {
+    const data = emptyData("user_amex_statement");
+    data.profile = { ...data.profile, minimumBuffer: 0 };
+    data.accounts = [
+      {
+        ...mockAccounts[0],
+        id: "acct_spend",
+        userId: data.userId,
+        institutionName: "Revolut",
+        name: "Spending",
+        type: "current_account",
+        subtype: "current",
+        balance: 500,
+        availableBalance: 500,
+        includeInSafeToSpend: true,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        status: "active",
+      },
+      {
+        ...mockAccounts[0],
+        id: "acct_amex_statement",
+        userId: data.userId,
+        institutionName: "American Express",
+        name: "Amex Platinum Cashback Credit Card",
+        type: "credit_card",
+        subtype: "credit_card",
+        purpose: "credit_card",
+        balance: -300,
+        balanceAvailable: true,
+        balanceSource: "statement",
+        currentBalance: null,
+        statementBalance: 300,
+        paymentDueDate: "2026-07-21",
+        statementStartDate: "2026-06-01",
+        statementEndDate: "2026-06-30",
+        availableBalance: 1700,
+        includeInSafeToSpend: false,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        status: "active",
+      },
+      {
+        ...mockAccounts[0],
+        id: "acct_amex_pocket",
+        userId: data.userId,
+        institutionName: "Revolut",
+        name: "AMEX",
+        type: "savings",
+        subtype: "pocket",
+        purpose: "pocket",
+        balance: 250,
+        availableBalance: 250,
+        reservedFor: "amex",
+        includeInSafeToSpend: false,
+        includeInCashflow: false,
+        includeInNetWorth: true,
+        status: "active",
+      },
+    ];
+
+    const model = buildFirebaseDashboardModel(data, "2026-07-01");
+
+    expect(model.kind).toBe("ready");
+    if (model.kind !== "ready") return;
+    expect(model.financeV2.creditCardFunding[0]).toMatchObject({
+      liabilityAccountId: "acct_amex_statement",
+      balance: 300,
+      balanceKnown: true,
+      balanceSource: "statement",
+      reservedBalance: 250,
+      unfundedBalance: 50,
+      paymentDueDate: "2026-07-21",
+    });
+    expect(model.summary.safeToSpend).toBe(450);
+    expect(model.warnings.join(" ")).toContain(
+      "current balance is not available from provider; using statement balance",
+    );
+  });
+
+  it("keeps a confirmed zero Amex statement balance visible", () => {
+    const data = emptyData("user_amex_zero_statement");
+    data.accounts = [
+      {
+        ...mockAccounts[0],
+        id: "acct_amex_zero",
+        userId: data.userId,
+        institutionName: "American Express",
+        name: "Amex Platinum Cashback Credit Card",
+        type: "credit_card",
+        subtype: "credit_card",
+        purpose: "credit_card",
+        balance: 0,
+        balanceAvailable: true,
+        balanceSource: "statement",
+        statementBalance: 0,
+        includeInSafeToSpend: false,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        status: "active",
+      },
+    ];
+
+    const model = buildFirebaseDashboardModel(data, "2026-07-01");
+
+    expect(model.kind).toBe("ready");
+    if (model.kind !== "ready") return;
+    expect(model.financeV2.creditCardFunding[0]).toMatchObject({
+      liabilityAccountId: "acct_amex_zero",
+      balance: 0,
+      balanceKnown: true,
+      balanceSource: "statement",
+    });
+  });
+
   it("does not silently show mock values in Firebase mode", () => {
     const empty = buildFirebaseDashboardModel(emptyData(), "2026-07-01");
     const live = buildFirebaseDashboardModel(liveData(), "2026-07-01");

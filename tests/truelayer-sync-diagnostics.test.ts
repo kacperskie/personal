@@ -207,6 +207,88 @@ describe("cards are off by default and optional", () => {
     });
   });
 
+  it("maps statement balance metadata without labelling it as current balance", async () => {
+    installFetch((url) => {
+      if (url.includes("/data/v1/cards/card_1/balance")) {
+        return {
+          body: {
+            results: [
+              {
+                statement_balance: 321.45,
+                available_credit: 1200,
+                payment_due_date: "2026-07-21",
+                statement_start_date: "2026-06-01",
+                statement_end_date: "2026-06-30",
+              },
+            ],
+          },
+        };
+      }
+      return okHandler(url);
+    });
+    const provider = new TrueLayerProvider(cardsEnabledConfig);
+    const accounts = await provider.getAccounts("conn_tl", context);
+    const card = accounts.find((item) => item.providerAccountId === "card_1");
+
+    expect(card).toMatchObject({
+      type: "credit_card",
+      balance: -321.45,
+      balanceAvailable: true,
+      balanceSource: "statement",
+      currentBalance: null,
+      statementBalance: 321.45,
+      paymentDueDate: "2026-07-21",
+      statementStartDate: "2026-06-01",
+      statementEndDate: "2026-06-30",
+      balanceDiagnostics: expect.objectContaining({
+        statementBalancePresent: true,
+        currentBalancePresent: false,
+        paymentDueDatePresent: true,
+        statementStartDatePresent: true,
+        statementEndDatePresent: true,
+        balanceSource: "statement",
+        explicitZeroReturned: false,
+      }),
+    });
+    expect(consoleLines.join("\n")).not.toContain("321.45");
+    expect(consoleLines.join("\n")).not.toContain("2026-07-21");
+    expect(consoleLines.join("\n")).not.toContain(SENTINEL_TOKEN);
+  });
+
+  it("keeps an explicit zero statement balance as a confirmed statement zero", async () => {
+    installFetch((url) => {
+      if (url.includes("/data/v1/cards/card_1/balance")) {
+        return {
+          body: {
+            results: [
+              {
+                statement_balance: 0,
+                payment_due_date: "2026-07-21",
+                statement_start_date: "2026-06-01",
+                statement_end_date: "2026-06-30",
+              },
+            ],
+          },
+        };
+      }
+      return okHandler(url);
+    });
+    const provider = new TrueLayerProvider(cardsEnabledConfig);
+    const accounts = await provider.getAccounts("conn_tl", context);
+    const card = accounts.find((item) => item.providerAccountId === "card_1");
+
+    expect(card).toMatchObject({
+      balance: 0,
+      balanceAvailable: true,
+      balanceSource: "statement",
+      statementBalance: 0,
+      balanceDiagnostics: expect.objectContaining({
+        statementBalancePresent: true,
+        explicitZeroReturned: true,
+      }),
+    });
+  });
+
   it("a cards 403 is non-blocking: core sync still succeeds when cards are enabled", async () => {
     installFetch((url) =>
       url.includes("/data/v1/cards")

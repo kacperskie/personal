@@ -40,6 +40,15 @@ export type TrueLayerBalancePayload = {
   current?: number;
   available?: number;
   credit_limit?: number;
+  statement_balance?: number;
+  statementBalance?: number;
+  payment_due_date?: string;
+  paymentDueDate?: string;
+  statement_start_date?: string;
+  statementStartDate?: string;
+  statement_end_date?: string;
+  statementEndDate?: string;
+  balanceSource?: "current" | "statement" | "unavailable";
   balanceAvailable?: boolean;
   status?: number | null;
   providerReason?: string | null;
@@ -86,6 +95,96 @@ function futureIso(days: number) {
 
 function safeConnectionId() {
   return `conn_truelayer_${crypto.randomUUID()}`;
+}
+
+function numberField(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (value && typeof value === "object") {
+    const object = value as { amount?: unknown; value?: unknown };
+    return numberField(object.value ?? object.amount);
+  }
+
+  return null;
+}
+
+function stringField(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function cardBalanceMetadata(row: Record<string, unknown>) {
+  const statement =
+    row.statement && typeof row.statement === "object"
+      ? (row.statement as Record<string, unknown>)
+      : {};
+  const period =
+    row.statement_period && typeof row.statement_period === "object"
+      ? (row.statement_period as Record<string, unknown>)
+      : {};
+  const currentBalance =
+    numberField(row.current) ??
+    numberField(row.current_balance) ??
+    numberField(row.currentBalance) ??
+    numberField(row.balance);
+  const statementBalance =
+    numberField(row.statement_balance) ??
+    numberField(row.statementBalance) ??
+    numberField(row.statement_balance_amount) ??
+    numberField(row.closing_balance) ??
+    numberField(statement.balance) ??
+    numberField(statement.statement_balance) ??
+    numberField(statement.amount_due);
+  const availableCredit =
+    numberField(row.available) ??
+    numberField(row.available_balance) ??
+    numberField(row.availableBalance) ??
+    numberField(row.available_credit) ??
+    numberField(row.availableCredit) ??
+    numberField(row.credit_available);
+  const creditLimit =
+    numberField(row.credit_limit) ?? numberField(row.creditLimit);
+  const paymentDueDate =
+    stringField(row.payment_due_date) ??
+    stringField(row.paymentDueDate) ??
+    stringField(row.due_date) ??
+    stringField(statement.payment_due_date) ??
+    stringField(statement.paymentDueDate) ??
+    stringField(statement.due_date);
+  const statementStartDate =
+    stringField(row.statement_start_date) ??
+    stringField(row.statementStartDate) ??
+    stringField(row.statement_period_start) ??
+    stringField(statement.start_date) ??
+    stringField(period.start_date);
+  const statementEndDate =
+    stringField(row.statement_end_date) ??
+    stringField(row.statementEndDate) ??
+    stringField(row.statement_period_end) ??
+    stringField(statement.end_date) ??
+    stringField(period.end_date);
+  const balanceSource: "current" | "statement" | "unavailable" =
+    currentBalance !== null ? "current" : statementBalance !== null ? "statement" : "unavailable";
+  const selectedBalance =
+    balanceSource === "current"
+      ? currentBalance
+      : balanceSource === "statement"
+        ? statementBalance
+        : null;
+
+  return {
+    currentBalance,
+    statementBalance,
+    availableCredit,
+    creditLimit,
+    paymentDueDate,
+    statementStartDate,
+    statementEndDate,
+    balanceSource,
+    selectedBalance,
+    explicitZeroReturned: selectedBalance === 0,
+  };
 }
 
 /**
@@ -441,13 +540,46 @@ async function defaultTrueLayerClientFactory(
               },
             );
 
-            return rows.map((row) => ({
-              ...(row as TrueLayerBalancePayload),
-              card_id: cardId,
-              balanceAvailable: true,
-              status: 200,
-              providerReason: null,
-            }));
+            return rows.map((row) => {
+              const metadata = cardBalanceMetadata(row as Record<string, unknown>);
+
+              logServerEvent({
+                level: "info",
+                event: "provider_sync_event",
+                message: "TrueLayer card balance diagnostics.",
+                metadata: {
+                  endpoint: "balance",
+                  pathTemplate: "/data/v1/cards/{card_id}/balance",
+                  endpointCalled: true,
+                  status: 200,
+                  balanceFieldsPresent: metadata.selectedBalance !== null,
+                  statementBalancePresent: metadata.statementBalance !== null,
+                  currentBalancePresent: metadata.currentBalance !== null,
+                  availableCreditPresent: metadata.availableCredit !== null,
+                  paymentDueDatePresent: metadata.paymentDueDate !== null,
+                  statementStartDatePresent: metadata.statementStartDate !== null,
+                  statementEndDatePresent: metadata.statementEndDate !== null,
+                  balanceSourceUsed: metadata.balanceSource,
+                  explicitZeroReturned: metadata.explicitZeroReturned,
+                },
+              });
+
+              return {
+                ...(row as TrueLayerBalancePayload),
+                card_id: cardId,
+                current: metadata.balanceSource === "current" ? metadata.currentBalance ?? undefined : undefined,
+                available: metadata.availableCredit ?? undefined,
+                credit_limit: metadata.creditLimit ?? undefined,
+                statement_balance: metadata.statementBalance ?? undefined,
+                payment_due_date: metadata.paymentDueDate ?? undefined,
+                statement_start_date: metadata.statementStartDate ?? undefined,
+                statement_end_date: metadata.statementEndDate ?? undefined,
+                balanceSource: metadata.balanceSource,
+                balanceAvailable: metadata.selectedBalance !== null,
+                status: 200,
+                providerReason: null,
+              };
+            });
           } catch (error) {
             const safeReason =
               error instanceof ProviderSafeError
@@ -461,6 +593,17 @@ async function defaultTrueLayerClientFactory(
               metadata: {
                 endpoint: "balance",
                 pathTemplate: "/data/v1/cards/{card_id}/balance",
+                endpointCalled: true,
+                status: error instanceof ProviderSafeError ? error.status : null,
+                balanceFieldsPresent: false,
+                statementBalancePresent: false,
+                currentBalancePresent: false,
+                availableCreditPresent: false,
+                paymentDueDatePresent: false,
+                statementStartDatePresent: false,
+                statementEndDatePresent: false,
+                balanceSourceUsed: "unavailable",
+                explicitZeroReturned: false,
                 reason: safeReason,
               },
             });
@@ -469,6 +612,7 @@ async function defaultTrueLayerClientFactory(
               {
                 card_id: cardId,
                 balanceAvailable: false,
+                balanceSource: "unavailable",
                 status: error instanceof ProviderSafeError ? error.status : null,
                 providerReason: safeReason,
               } satisfies TrueLayerBalancePayload,
@@ -550,15 +694,32 @@ export function truelayerAccountPayload(
       current?: number;
       available?: number;
       credit_limit?: number;
+      statement_balance?: number;
     };
   };
   const providerAccountId = payload.account_id ?? payload.card_id;
   const balance = balanceForAccount(providerAccountId, balances);
   const isCard = Boolean(payload.card_id) || payload.account_type === "CREDIT_CARD";
+  const cardStatementBalance =
+    balance?.statement_balance ??
+    balance?.statementBalance ??
+    payload.balance?.statement_balance;
   const currentBalancePresent =
     typeof balance?.current === "number" ||
     typeof payload.current_balance === "number" ||
     typeof payload.balance?.current === "number";
+  const statementBalancePresent = typeof cardStatementBalance === "number";
+  const cardBalanceSource =
+    isCard
+      ? balance?.balanceSource ??
+        (currentBalancePresent ? "current" : cardStatementBalance !== undefined ? "statement" : "unavailable")
+      : "current";
+  const selectedCardBalance =
+    cardBalanceSource === "current"
+      ? balance?.current ?? payload.current_balance ?? payload.balance?.current ?? null
+      : cardBalanceSource === "statement"
+        ? cardStatementBalance ?? null
+        : null;
   const availableCreditPresent =
     typeof balance?.available === "number" ||
     typeof payload.available_balance === "number" ||
@@ -567,8 +728,11 @@ export function truelayerAccountPayload(
     typeof payload.credit_limit === "number" ||
     typeof payload.balance?.credit_limit === "number";
   const balanceAvailable = isCard
-    ? Boolean(balance?.balanceAvailable && currentBalancePresent)
+    ? Boolean(balance?.balanceAvailable && selectedCardBalance !== null)
     : currentBalancePresent || typeof balance?.available === "number";
+  const rawBalance = isCard
+    ? selectedCardBalance ?? 0
+    : balance?.current ?? payload.current_balance ?? payload.balance?.current ?? 0;
 
   return {
     id: providerAccountId,
@@ -581,15 +745,28 @@ export function truelayerAccountPayload(
     officialName: payload.display_name,
     type: isCard ? "credit_card" : payload.account_type,
     accountType: isCard ? "credit_card" : payload.account_type,
-    balance: balance?.current ?? payload.current_balance ?? payload.balance?.current ?? 0,
+    balance: rawBalance,
     balanceAvailable,
     balanceUnavailableReason: balanceAvailable ? null : "provider_balance_unavailable",
+    balanceSource: isCard ? cardBalanceSource : balanceAvailable ? "current" : "unavailable",
+    currentBalance:
+      balance?.current ?? payload.current_balance ?? payload.balance?.current ?? null,
+    statementBalance: cardStatementBalance ?? null,
+    paymentDueDate: balance?.payment_due_date ?? balance?.paymentDueDate ?? null,
+    statementStartDate: balance?.statement_start_date ?? balance?.statementStartDate ?? null,
+    statementEndDate: balance?.statement_end_date ?? balance?.statementEndDate ?? null,
     balanceDiagnostics: {
       endpointCalled: isCard ? Boolean(balance) : true,
       status: balance?.status ?? null,
-      balanceValuePresent: currentBalancePresent,
+      balanceValuePresent: isCard ? selectedCardBalance !== null : currentBalancePresent,
+      statementBalancePresent,
       availableCreditPresent,
       currentBalancePresent,
+      paymentDueDatePresent: Boolean(balance?.payment_due_date ?? balance?.paymentDueDate),
+      statementStartDatePresent: Boolean(balance?.statement_start_date ?? balance?.statementStartDate),
+      statementEndDatePresent: Boolean(balance?.statement_end_date ?? balance?.statementEndDate),
+      balanceSource: isCard ? cardBalanceSource : balanceAvailable ? "current" : "unavailable",
+      explicitZeroReturned: selectedCardBalance === 0,
       mappedAsLiability: isCard && balanceAvailable,
       providerReason: balance?.providerReason ?? null,
     },

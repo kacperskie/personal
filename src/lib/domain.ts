@@ -109,6 +109,8 @@ export type ConsentStatus =
   | "revoked"
   | "failed";
 
+export type AccountBalanceSource = "current" | "statement" | "unavailable";
+
 export type Account = {
   id: string;
   userId: string;
@@ -125,12 +127,24 @@ export type Account = {
   /** True only when the provider returned a real balance value. False prevents fake GBP0 card debt. */
   balanceAvailable?: boolean;
   balanceUnavailableReason?: string | null;
+  balanceSource?: AccountBalanceSource | null;
+  currentBalance?: number | null;
+  statementBalance?: number | null;
+  paymentDueDate?: string | null;
+  statementStartDate?: string | null;
+  statementEndDate?: string | null;
   balanceDiagnostics?: {
     endpointCalled?: boolean;
     status?: number | null;
     balanceValuePresent?: boolean;
+    statementBalancePresent?: boolean;
     availableCreditPresent?: boolean;
     currentBalancePresent?: boolean;
+    paymentDueDatePresent?: boolean;
+    statementStartDatePresent?: boolean;
+    statementEndDatePresent?: boolean;
+    balanceSource?: AccountBalanceSource;
+    explicitZeroReturned?: boolean;
     mappedAsLiability?: boolean;
     providerReason?: string | null;
   } | null;
@@ -248,6 +262,12 @@ export type ProviderAccount = {
   balance: number;
   balanceAvailable?: boolean;
   balanceUnavailableReason?: string | null;
+  balanceSource?: AccountBalanceSource | null;
+  currentBalance?: number | null;
+  statementBalance?: number | null;
+  paymentDueDate?: string | null;
+  statementStartDate?: string | null;
+  statementEndDate?: string | null;
   balanceDiagnostics?: Account["balanceDiagnostics"];
   availableBalance: number | null;
   creditLimit: number | null;
