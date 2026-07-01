@@ -2,13 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { getBackendProvider } from "@/lib/backend/provider";
 import { firebaseSessionCookieName } from "@/lib/firebase/constants";
 
-const publicRoutes = [
-  "/sign-in",
-  "/api/auth/firebase-session",
-  // TEMPORARY: value-free runtime env-visibility probe so a broken sign-in can be
-  // diagnosed without auth. Remove this entry (and the route) once sign-in works.
-  "/api/debug/env-visibility",
-];
+const publicRoutes = ["/sign-in", "/api/auth/firebase-session"];
 
 export async function middleware(request: NextRequest) {
   const backendProvider = getBackendProvider();
