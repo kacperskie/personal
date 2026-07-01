@@ -48,6 +48,8 @@ export type TrueLayerProviderConfig = {
   scopes: string[];
   configured: boolean;
   sandboxMode: boolean;
+  /** "sandbox" when TRUELAYER_SANDBOX_ENABLED !== "false", otherwise "live". */
+  mode: "sandbox" | "live";
   /** Optional capability, off by default. Cards are not part of core sync. */
   cardsEnabled: boolean;
 };
@@ -70,6 +72,12 @@ export type TrueLayerSandboxReadiness = {
   tokenStoreAvailable: boolean;
   supabaseConfigured: boolean;
   providerClientCanBeInitialised: boolean;
+  mode: "sandbox" | "live";
+  clientIdConfigured: boolean;
+  clientSecretConfigured: boolean;
+  redirectUriConfigured: boolean;
+  /** True when live mode is on but the client ID still looks like a sandbox id. */
+  sandboxClientIdInLiveMode: boolean;
   safeMessage: string;
 };
 
@@ -152,10 +160,17 @@ export function getTrueLayerProviderConfig(
     env.TRUELAYER_REDIRECT_URI ||
     "http://localhost:3000/api/bank-connections/callback";
   const webhookSecret = env.TRUELAYER_WEBHOOK_SECRET || null;
+  // Mode is driven by the flag: sandbox unless explicitly TRUELAYER_SANDBOX_ENABLED=false.
+  // Base URLs default from the mode (explicit env overrides still win), so turning
+  // the flag off switches the app to the live TrueLayer environment.
+  const sandboxMode = env.TRUELAYER_SANDBOX_ENABLED !== "false";
+  const mode: "sandbox" | "live" = sandboxMode ? "sandbox" : "live";
   const apiBaseUrl =
-    env.TRUELAYER_API_BASE_URL || "https://api.truelayer-sandbox.com";
+    env.TRUELAYER_API_BASE_URL ||
+    (sandboxMode ? "https://api.truelayer-sandbox.com" : "https://api.truelayer.com");
   const authBaseUrl =
-    env.TRUELAYER_AUTH_BASE_URL || "https://auth.truelayer-sandbox.com";
+    env.TRUELAYER_AUTH_BASE_URL ||
+    (sandboxMode ? "https://auth.truelayer-sandbox.com" : "https://auth.truelayer.com");
   // Cards are NOT in the default scope set — they are an optional capability
   // enabled via TRUELAYER_CARDS_ENABLED. Core sync uses info/accounts/balance/
   // transactions/offline_access only.
@@ -164,10 +179,6 @@ export function getTrueLayerProviderConfig(
     .map((scope) => scope.trim())
     .filter(Boolean);
   const cardsEnabled = env.TRUELAYER_CARDS_ENABLED === "true";
-  const sandboxMode =
-    env.TRUELAYER_SANDBOX_ENABLED === "true" ||
-    apiBaseUrl.toLowerCase().includes("sandbox") ||
-    authBaseUrl.toLowerCase().includes("sandbox");
   const openBankingEnabled =
     env.OPEN_BANKING_ENABLED === "true" && env.OPEN_BANKING_PROVIDER === "truelayer";
 
@@ -183,6 +194,7 @@ export function getTrueLayerProviderConfig(
     scopes,
     configured: Boolean(openBankingEnabled && clientId && clientSecret && redirectUri),
     sandboxMode,
+    mode,
     cardsEnabled,
   };
 }
@@ -307,12 +319,15 @@ export function getTrueLayerSandboxReadiness(
   const missingEnvironment = requiredEnvironment
     .filter((item) => openBankingActive && !item.present)
     .map((item) => item.name);
+  // The client can initialise in EITHER environment (sandbox or live) once
+  // configured — mode no longer gates this, so live mode is a first-class path.
   const providerClientCanBeInitialised =
     providerSelected &&
     config.configured &&
-    config.sandboxMode &&
     requiredScopesPresent &&
     tokenEncryptionConfigured;
+  const sandboxClientIdInLiveMode =
+    config.mode === "live" && Boolean(config.clientId?.startsWith("sandbox-"));
 
   return {
     providerSelected,
@@ -326,13 +341,20 @@ export function getTrueLayerSandboxReadiness(
     requiredScopesPresent,
     tokenEncryptionConfigured,
     tokenStoreAvailable: tokenEncryptionConfigured,
+    mode: config.mode,
+    clientIdConfigured: Boolean(config.clientId),
+    clientSecretConfigured: Boolean(config.clientSecret),
+    redirectUriConfigured: Boolean(config.redirectUri),
+    sandboxClientIdInLiveMode,
     supabaseConfigured: isSupabaseConfigured(),
     providerClientCanBeInitialised,
-    safeMessage: providerClientCanBeInitialised
-      ? "TrueLayer read-only sandbox is configured with server-only encrypted token storage."
-      : flags.openBankingEnabled && providerSelected
-        ? "TrueLayer is selected but missing read-only configuration. Mock provider remains available only when explicitly selected."
-        : "Open Banking is disabled. TrueLayer will not be called until the feature flag and provider are enabled.",
+    safeMessage: sandboxClientIdInLiveMode
+      ? 'TrueLayer live mode is on, but the client ID still starts with "sandbox-". Set live TrueLayer credentials before connecting real bank data.'
+      : providerClientCanBeInitialised
+        ? `TrueLayer read-only ${config.mode} mode is configured with server-only encrypted token storage.`
+        : flags.openBankingEnabled && providerSelected
+          ? "TrueLayer is selected but missing read-only configuration. Mock provider remains available only when explicitly selected."
+          : "Open Banking is disabled. TrueLayer will not be called until the feature flag and provider are enabled.",
   };
 }
 

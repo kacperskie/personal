@@ -94,6 +94,11 @@ export function ConnectedAccountsManager({
     () => connections.filter(isDeadPreConsentConnection).length,
     [connections],
   );
+  const truelayerMode = providerState.truelayerReadiness?.mode ?? "sandbox";
+  const truelayerLabel = truelayerMode === "live" ? "TrueLayer live" : "TrueLayer sandbox";
+  const resolvedProviderOptions = providerOptions.map((option) =>
+    option.value === "truelayer" ? { ...option, label: truelayerLabel } : option,
+  );
 
   async function postJson(url: string, body?: Record<string, unknown>) {
     const response = await fetch(url, {
@@ -121,13 +126,15 @@ export function ConnectedAccountsManager({
           selectedProvider === "moneyhub"
             ? "moneyhub_sandbox"
             : selectedProvider === "truelayer"
-              ? "truelayer_sandbox"
+              ? truelayerMode === "live"
+                ? "truelayer_live"
+                : "truelayer_sandbox"
               : "mock_sandbox",
         institutionName:
           selectedProvider === "moneyhub"
             ? "Moneyhub sandbox"
             : selectedProvider === "truelayer"
-              ? "TrueLayer sandbox"
+              ? truelayerLabel
               : "Mock sandbox",
       })
         .then((payload) => {
@@ -248,31 +255,57 @@ export function ConnectedAccountsManager({
         <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-ink">TrueLayer sandbox readiness</h2>
+              <h2 className="text-lg font-semibold text-ink">
+                TrueLayer {providerState.truelayerReadiness.mode} readiness
+              </h2>
               <p className="mt-2 text-sm leading-6 text-ink/70">
                 {providerState.truelayerReadiness.safeMessage}
               </p>
             </div>
             <StatusPill
-              label={
-                providerState.truelayerReadiness.configured
-                  ? "configured"
-                  : "not configured"
-              }
-              tone={providerState.truelayerReadiness.configured ? "good" : "warning"}
+              label={providerState.truelayerReadiness.mode === "live" ? "live mode" : "sandbox mode"}
+              tone={providerState.truelayerReadiness.mode === "live" ? "warning" : "neutral"}
             />
           </div>
+          {providerState.truelayerReadiness.sandboxClientIdInLiveMode ? (
+            <div className="mt-4 flex gap-3 rounded-lg border border-berry/30 bg-berry/10 p-4 text-sm text-ink/80">
+              <ShieldAlert className="h-5 w-5 shrink-0 text-berry" aria-hidden="true" />
+              <p>
+                Live mode is enabled but the TrueLayer client ID still starts with
+                &quot;sandbox-&quot;. Set live TrueLayer credentials before connecting real bank
+                data.
+              </p>
+            </div>
+          ) : null}
           <dl className="mt-5 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
             <div className="rounded-lg border border-line bg-paper p-3">
-              <dt className="text-ink/50">Provider selected</dt>
+              <dt className="text-ink/50">Mode</dt>
               <dd className="mt-1 font-semibold text-ink">
-                {providerState.truelayerReadiness.providerSelected ? "TrueLayer" : "Mock/other"}
+                {providerState.truelayerReadiness.mode === "live" ? "Live" : "Sandbox"}
               </dd>
             </div>
             <div className="rounded-lg border border-line bg-paper p-3">
-              <dt className="text-ink/50">Sandbox mode</dt>
+              <dt className="text-ink/50">Client ID</dt>
               <dd className="mt-1 font-semibold text-ink">
-                {providerState.truelayerReadiness.sandboxModeEnabled ? "Enabled" : "Not enabled"}
+                {providerState.truelayerReadiness.clientIdConfigured ? "Present" : "Missing"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Client secret</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.clientSecretConfigured ? "Present" : "Missing"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Redirect URI</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.redirectUriConfigured ? "Present" : "Missing"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Scopes</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.requiredScopesPresent ? "Present" : "Missing"}
               </dd>
             </div>
             <div className="rounded-lg border border-line bg-paper p-3">
@@ -378,7 +411,9 @@ export function ConnectedAccountsManager({
           <div>
             <div className="flex items-center gap-2">
               <Cable className="h-5 w-5 text-teal" aria-hidden="true" />
-              <h2 className="text-lg font-semibold text-ink">Start sandbox connection</h2>
+              <h2 className="text-lg font-semibold text-ink">
+                Start {selectedProvider === "truelayer" ? (truelayerMode === "live" ? "live" : "sandbox") : "sandbox"} connection
+              </h2>
             </div>
             <p className="mt-2 text-sm leading-6 text-ink/70">
               Provider-specific work stays behind the adapter. TrueLayer is the read-only
@@ -404,7 +439,7 @@ export function ConnectedAccountsManager({
                 onChange={(event) => setSelectedProvider(event.target.value as BankProvider)}
                 className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink"
               >
-                {providerOptions.map((provider) => (
+                {resolvedProviderOptions.map((provider) => (
                   <option key={provider.value} value={provider.value}>
                     {provider.label}
                   </option>
@@ -503,7 +538,20 @@ export function ConnectedAccountsManager({
                   <>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="font-semibold text-ink">{connection.institutionName}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-ink">{connection.institutionName}</h3>
+                    {connection.provider === "truelayer" ? (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          /live/i.test(connection.institutionId)
+                            ? "bg-berry/10 text-berry"
+                            : "bg-ink/5 text-ink/60"
+                        }`}
+                      >
+                        {/live/i.test(connection.institutionId) ? "live" : "sandbox"}
+                      </span>
+                    ) : null}
+                  </div>
                   <p className="mt-1 text-sm text-ink/60">
                     Provider: {connection.provider} - Institution ID: {connection.institutionId}
                   </p>

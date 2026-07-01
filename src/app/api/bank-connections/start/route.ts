@@ -62,7 +62,7 @@ export async function POST(request: Request) {
           connection: start.connection,
           type: "connection_successful",
           title: `${start.connection.institutionName} connection started`,
-          body: "The sandbox consent flow has been started.",
+          body: "The consent flow has been started.",
           severity: "info",
         }),
       );

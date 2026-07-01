@@ -51,6 +51,8 @@ export default async function ConnectedAccountsPage() {
       )
     : [];
   const tokenDiagnostics = Object.fromEntries(tokenDiagnosticsEntries);
+  const providerState = getProviderConfiguredState();
+  const truelayerMode = providerState.truelayerReadiness?.mode ?? "sandbox";
   const asOfDate = new Date().toISOString().slice(0, 10);
   const connectionsWithDisplayStatus = bankConnections.map((connection) => ({
     ...connection,
@@ -74,7 +76,7 @@ export default async function ConnectedAccountsPage() {
       <PageHeader
         eyebrow="Open Banking foundation"
         title="Connected Accounts"
-        description="Read-only TrueLayer sandbox connections with provider-agnostic routes, mock fallback, and server-only encrypted token handling."
+        description={`Read-only TrueLayer ${truelayerMode} connections with provider-agnostic routes, mock fallback, and server-only encrypted token handling.`}
       />
 
       <section className="grid gap-4 xl:grid-cols-3">
@@ -100,7 +102,7 @@ export default async function ConnectedAccountsPage() {
       <ConnectedAccountsManager
         connections={bankConnections}
         tokenDiagnostics={tokenDiagnostics}
-        providerState={getProviderConfiguredState()}
+        providerState={providerState}
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">

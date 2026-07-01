@@ -76,6 +76,17 @@ function safeConnectionId() {
   return `conn_truelayer_${crypto.randomUUID()}`;
 }
 
+/**
+ * Environment-aware labels for a TrueLayer connection record. Sandbox and live
+ * connections are labelled and id'd distinctly so they are never treated as the
+ * same environment.
+ */
+function trueLayerEnvironmentLabels(mode: "sandbox" | "live") {
+  return mode === "live"
+    ? { institutionName: "TrueLayer live", institutionId: "truelayer_live" }
+    : { institutionName: "TrueLayer sandbox", institutionId: "truelayer_sandbox" };
+}
+
 function redirectHostname(redirectUri: string | null | undefined) {
   if (!redirectUri) {
     return null;
@@ -91,7 +102,7 @@ function redirectHostname(redirectUri: string | null | undefined) {
 function safeMessageForConfig(config: TrueLayerProviderConfig) {
   return config.configured
     ? null
-    : "TrueLayer sandbox credentials are not configured.";
+    : "TrueLayer credentials are not configured.";
 }
 
 function tokenExpiry(tokens: unknown) {
@@ -544,13 +555,16 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     const now = nowIso();
     const connectionId = safeConnectionId();
     const redirectUri = input.redirectUri ?? this.config.redirectUri;
+    // The environment (sandbox/live) is authoritative from server config — not
+    // the client-supplied label — so live connections are recorded as live.
+    const environment = trueLayerEnvironmentLabels(this.config.mode);
     const connection: BankConnection = {
       id: connectionId,
       userId: input.userId,
       provider: "truelayer",
       providerUserId: input.userId ?? null,
-      institutionName: input.institutionName || "TrueLayer sandbox",
-      institutionId: input.institutionId || "truelayer_sandbox",
+      institutionName: environment.institutionName,
+      institutionId: environment.institutionId,
       status: this.config.configured ? "connecting" : "not_connected",
       consentStatus: this.config.configured ? "pending" : "not_started",
       consentStartedAt: this.config.configured ? now : null,
@@ -568,7 +582,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         authorizationUrl: null,
         providerConfigured: false,
         state: connectionId,
-        safeMessage: "TrueLayer sandbox credentials are not configured.",
+        safeMessage: "TrueLayer credentials are not configured.",
       };
     }
 
@@ -577,8 +591,8 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       providerUserId: input.userId,
       provider: "truelayer",
       connectionId,
-      institutionId: input.institutionId || "truelayer_sandbox",
-      institutionName: input.institutionName || "TrueLayer sandbox",
+      institutionId: environment.institutionId,
+      institutionName: environment.institutionName,
       redirectUri,
     });
     const { authorizationUrl, diagnostics } = buildTrueLayerAuthorizationUrl({
@@ -671,20 +685,21 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         createdAt: now,
         updatedAt: now,
       },
-      safeMessage: "TrueLayer sandbox callback handled.",
+      safeMessage: "TrueLayer callback handled.",
     };
   }
 
   async getConnectionStatus(connectionId: string): Promise<BankConnection> {
     const now = nowIso();
     const attempt = getConnectionAttempt(connectionId);
+    const environment = trueLayerEnvironmentLabels(this.config.mode);
 
     return {
       id: connectionId,
       provider: "truelayer",
       providerUserId: attempt?.providerUserId ?? null,
-      institutionName: attempt?.institutionName ?? "TrueLayer sandbox",
-      institutionId: attempt?.institutionId ?? "truelayer_sandbox",
+      institutionName: attempt?.institutionName ?? environment.institutionName,
+      institutionId: attempt?.institutionId ?? environment.institutionId,
       status: this.config.configured ? "connected" : "not_connected",
       consentStatus: this.config.configured ? "active" : "not_started",
       consentStartedAt: this.config.configured ? now : null,

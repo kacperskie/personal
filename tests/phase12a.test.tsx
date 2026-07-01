@@ -48,6 +48,7 @@ const configuredTrueLayer: TrueLayerProviderConfig = {
   scopes: ["info", "accounts", "balance", "cards", "transactions", "offline_access"],
   configured: true,
   sandboxMode: true,
+  mode: "sandbox",
   cardsEnabled: true,
 };
 
@@ -56,6 +57,7 @@ const liveTrueLayer: TrueLayerProviderConfig = {
   authBaseUrl: "https://auth.truelayer.com",
   apiBaseUrl: "https://api.truelayer.com",
   sandboxMode: false,
+  mode: "live",
 };
 
 const baseConnection: BankConnection = {
