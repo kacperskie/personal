@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectedAccountsManager } from "../src/components/connected-accounts/connected-accounts-manager";
 import type {
   BankConnection,
+  ProviderAccount,
   ProviderSyncEvent,
   Transaction,
 } from "../src/lib/domain";
@@ -31,6 +32,7 @@ import {
   createTransactionNotification,
 } from "../src/lib/bank-providers/transaction-notifications";
 import {
+  isScheduledLiveTrueLayerConnection,
   isScheduledSyncRequestAuthorized,
   shouldSkipScheduledConnection,
 } from "../src/app/api/bank-connections/scheduled-sync/route";
@@ -290,6 +292,37 @@ describe("phase 8A event-driven transaction sync", () => {
     ).toBe(true);
   });
 
+  it("only schedules active live TrueLayer connections", () => {
+    const now = new Date("2026-06-30T09:00:00.000Z");
+    const liveTrueLayer: BankConnection = {
+      ...baseConnection,
+      provider: "truelayer",
+      institutionName: "TrueLayer live",
+      institutionId: "truelayer_live",
+      mode: "live",
+      lastSyncedAt: "2026-06-30T07:00:00.000Z",
+    };
+
+    expect(isScheduledLiveTrueLayerConnection(liveTrueLayer, now)).toBe(true);
+    expect(
+      isScheduledLiveTrueLayerConnection(
+        {
+          ...liveTrueLayer,
+          institutionName: "TrueLayer sandbox",
+          mode: "sandbox",
+          institutionId: "truelayer_sandbox",
+        },
+        now,
+      ),
+    ).toBe(false);
+    expect(
+      isScheduledLiveTrueLayerConnection({ ...liveTrueLayer, consentStatus: "revoked" }, now),
+    ).toBe(false);
+    expect(
+      isScheduledLiveTrueLayerConnection({ ...liveTrueLayer, provider: "mock" }, now),
+    ).toBe(false);
+  });
+
   it("handles pending-to-posted transaction reconciliation", () => {
     const existing = transaction({
       status: "suggested",
@@ -465,13 +498,35 @@ describe("phase 8A event-driven transaction sync", () => {
           userId: "user_mock_001",
           connection: {
             ...baseConnection,
+            provider: "truelayer",
+            institutionName: "TrueLayer live",
+            institutionId: "truelayer_live",
+            mode: "live",
+            lastSyncedAt: "2026-06-30T07:00:00.000Z",
+          },
+        },
+        {
+          userId: "user_mock_001",
+          connection: {
+            ...baseConnection,
+            id: "conn_sandbox",
+            provider: "truelayer",
+            institutionName: "TrueLayer sandbox",
+            institutionId: "truelayer_sandbox",
+            mode: "sandbox",
             lastSyncedAt: "2026-06-30T07:00:00.000Z",
           },
         },
       ],
       getServiceBankConnectionById: async () => ({
         userId: "user_mock_001",
-        connection: baseConnection,
+        connection: {
+          ...baseConnection,
+          provider: "truelayer",
+          institutionName: "TrueLayer live",
+          institutionId: "truelayer_live",
+          mode: "live",
+        },
       }),
       recordServiceAuditEvent: async (event: unknown) => event,
     }));
@@ -498,6 +553,100 @@ describe("phase 8A event-driven transaction sync", () => {
     expect(response.status).toBe(200);
     expect(payload.queued).toBe(1);
     expect(payload.processed).toBe(1);
+    expect(payload.skipped).toBe(1);
+  });
+
+  it("scheduled server sync creates review notifications for newly stored transactions", async () => {
+    vi.resetModules();
+    vi.doUnmock("@/lib/bank-providers/server-sync-runner");
+    const notifications: Array<{ type: string; privacySafeBody: string }> = [];
+    const providerAccount: ProviderAccount = {
+      providerConnectionId: baseConnection.id,
+      providerAccountId: "provider_current_1",
+      institutionName: "Mock Bank",
+      institutionId: "mock_bank",
+      name: "Current account",
+      officialName: "Current account",
+      type: "current_account",
+      subtype: "current",
+      balance: 1000,
+      availableBalance: 1000,
+      creditLimit: null,
+      currency: "GBP",
+      mask: null,
+    };
+
+    vi.doMock("@/lib/repositories/service-finance-repository", () => ({
+      getServiceFinanceSnapshot: async () => ({
+        accounts: [],
+        bills: [],
+        budgets: [],
+        budgetPeriods: [],
+        categories: [],
+        manualFinanceItems: [],
+        transactions: [],
+        bankConnections: [baseConnection],
+      }),
+      upsertServiceAccount: async (_userId: string, account: unknown) => account,
+      upsertServiceTransaction: async (_userId: string, syncedTransaction: unknown) =>
+        syncedTransaction,
+      recordServiceProviderSyncEvent: async (_userId: string, event: ProviderSyncEvent) => event,
+      updateServiceBankConnectionStatus: async (_userId: string, connection: unknown) =>
+        connection,
+      recordServiceAuditEvent: async (event: unknown) => event,
+      createServiceNotification: async (notification: { type: string; privacySafeBody: string }) => {
+        notifications.push(notification);
+        return notification;
+      },
+    }));
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({
+      getProviderAdapter: () => ({
+        refreshConnection: async () => ({
+          id: "sync_refresh_notification",
+          providerConnectionId: baseConnection.id,
+          provider: "mock" as const,
+          status: "syncing" as const,
+          message: "Refresh queued.",
+          startedAt: "2026-06-30T09:00:00.000Z",
+          finishedAt: null,
+        }),
+        getAccounts: async () => [providerAccount],
+        getTransactions: async () => [
+          {
+            id: "provider_tx_large",
+            providerConnectionId: baseConnection.id,
+            providerAccountId: providerAccount.providerAccountId,
+            providerTransactionId: "provider_tx_large",
+            date: "2026-06-30",
+            providerUpdatedAt: "2026-06-30T09:00:00.000Z",
+            providerStatus: "posted" as const,
+            merchant: "Large merchant",
+            description: "Large purchase",
+            amount: -750,
+            currency: "GBP" as const,
+            pending: false,
+            category: null,
+            isOwnAccountTransfer: false,
+          },
+        ],
+        revokeConnection: vi.fn(),
+      }),
+    }));
+
+    const { runServerConnectionSync } = await import(
+      "../src/lib/bank-providers/server-sync-runner"
+    );
+    const result = await runServerConnectionSync({
+      userId: "user_mock_001",
+      connection: baseConnection,
+      syncTrigger: "scheduled",
+    });
+
+    expect(result.transactionsUpserted).toBe(1);
+    expect(notifications.map((notification) => notification.type)).toContain("new_transaction");
+    expect(notifications.map((notification) => notification.type)).toContain("large_transaction");
+    expect(notifications.every((notification) => notification.privacySafeBody)).toBe(true);
+    expect(JSON.stringify(notifications)).not.toContain("access_token");
   });
 
   it("Connected Accounts UI includes refresh all active control", () => {

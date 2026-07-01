@@ -25,7 +25,10 @@ export function resolveScheduledBaseUrl(env: NodeJS.ProcessEnv = process.env) {
 }
 
 export async function invokeProtectedScheduledRoute(
-  path: "/api/notifications/scheduled" | "/api/bank-connections/scheduled-sync",
+  path:
+    | "/api/notifications/scheduled"
+    | "/api/bank-connections/scheduled-sync"
+    | "/api/scheduled/bank-sync",
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ScheduledRouteResult> {
   const cronSecret = env.CRON_SECRET;

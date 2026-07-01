@@ -61,6 +61,7 @@ export async function POST() {
         recordProviderSyncEvent,
         updateBankConnectionStatus,
       },
+      syncTrigger: "sync_all",
     });
 
     for (const event of result.auditEvents) {

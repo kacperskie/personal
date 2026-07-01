@@ -154,6 +154,20 @@ export function getTransactionBudgetTreatment(
   }
 
   const reason = deterministicExclusionReason(transaction, account);
+  const pending = transaction.pending || transaction.providerStatus === "pending";
+  if (pending) {
+    return {
+      transactionId: transaction.id,
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: isExpense(transaction),
+      budgetCategory: transaction.categoryId,
+      exclusionReason: null,
+      source: "deterministic",
+    };
+  }
+
   const ordinarySpend = isExpense(transaction) && !reason;
   const bill = reason === "bill" || reason === "rent";
 

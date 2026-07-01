@@ -131,6 +131,7 @@ async function processJob(job: SyncJob) {
     connection: record.connection,
     accountIds: job.accountIds,
     createNotifications: false,
+    syncTrigger: "webhook",
   });
 }
 

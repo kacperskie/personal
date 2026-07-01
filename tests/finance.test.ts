@@ -28,6 +28,7 @@ import {
 } from "../src/lib/finance";
 import {
   amexFundingSummary,
+  applyCreditCardPlanningBalances,
   calculateBudgetTotal,
   calculateCreditCardBalanceSummary,
   getTransactionBudgetTreatment,
@@ -313,6 +314,37 @@ describe("finance calculations", () => {
     expect(purchase).toEqual(rawBefore);
   });
 
+  it("keeps pending transactions out of actual weekly and monthly budgets by default", () => {
+    const account = {
+      ...mockAccounts[0],
+      id: "acct_pending_budget",
+      institutionName: "Revolut",
+      name: "Spending account",
+      purpose: "everyday_spending",
+      includeInSafeToSpend: true,
+    } satisfies Account;
+    const pendingPurchase: Transaction = {
+      ...mockTransactionRecords[0],
+      id: "txn_pending_budget",
+      accountId: account.id,
+      merchant: "Pending merchant",
+      amount: -24,
+      kind: "expense",
+      flags: [],
+      date: currentPeriod.startDate,
+      pending: true,
+      providerStatus: "pending",
+    };
+    const treatment = getTransactionBudgetTreatment(pendingPurchase, account, null);
+
+    expect(treatment.includeInWeeklyBudget).toBe(false);
+    expect(treatment.includeInMonthlyBudget).toBe(false);
+    expect(treatment.includeInSafeToSpendImpact).toBe(true);
+    expect(
+      calculateBudgetTotal([pendingPurchase], [account], [], currentPeriod, "weekly"),
+    ).toBe(0);
+  });
+
   it("defaults Amex payments, internal transfers and Amex pocket transfers out of budgets", () => {
     const account = {
       ...mockAccounts[0],
@@ -439,6 +471,65 @@ describe("finance calculations", () => {
       confidence: "confirmed",
       estimatedCurrentBalance: null,
     });
+  });
+
+  it("keeps credit-card amount owed positive for display but negative for net worth", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_sign_convention",
+      institutionName: "American Express",
+      name: "Amex Platinum Cashback Credit Card",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: 0,
+      balanceAvailable: true,
+      balanceSource: "statement",
+      statementBalance: 1400.49,
+      statementEndDate: "2026-06-20",
+      availableBalance: 2500,
+      creditLimit: 3900.49,
+      includeInSafeToSpend: false,
+      includeInNetWorth: true,
+    } satisfies Account;
+    const purchase = {
+      ...mockTransactionRecords[0],
+      id: "tx_amex_sign_purchase",
+      accountId: amex.id,
+      date: "2026-06-21",
+      amount: -100,
+      kind: "expense",
+      pending: false,
+      providerStatus: "posted",
+      merchant: "Shop",
+      description: "Shop",
+    } satisfies Transaction;
+    const payment = {
+      ...mockTransactionRecords[0],
+      id: "tx_amex_sign_payment",
+      accountId: amex.id,
+      date: "2026-06-22",
+      amount: 50,
+      kind: "income",
+      pending: false,
+      providerStatus: "posted",
+      merchant: "Payment received",
+      description: "Payment received",
+    } satisfies Transaction;
+
+    const summary = calculateCreditCardBalanceSummary({
+      account: amex,
+      transactions: [purchase, payment],
+      calculatedAt: "2026-07-01T00:00:00.000Z",
+    });
+    const planningAccount = applyCreditCardPlanningBalances([amex], [summary])[0];
+
+    expect(summary.balanceUsedForPlanning).toBe(1450.49);
+    expect(summary.estimatedCurrentBalance).toBe(1450.49);
+    expect(planningAccount.balance).toBe(-1450.49);
+    expect(calculateTotalLiabilities([planningAccount], [], [])).toBe(1450.49);
+    expect(calculateNetWorth([planningAccount], [], [])).toBe(-1450.49);
+    expect(calculateSafeToSpendEligibleCash([planningAccount])).toBe(0);
   });
 
   it("estimates Amex current balance from statement balance plus purchases minus payments", () => {

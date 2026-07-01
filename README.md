@@ -26,7 +26,7 @@ Implemented locally:
 - TrueLayer webhook placeholder at `POST /api/bank-connections/webhook/truelayer` with safe signature checks, event parsing, audit events, and sync job enqueueing.
 - Idempotent provider webhook event tracking with duplicate webhook no-op handling.
 - Lightweight sync queue abstraction with Supabase persistence when configured and in-memory mock fallback otherwise.
-- Scheduled fallback sync route at `POST /api/bank-connections/scheduled-sync`, protected by `CRON_SECRET`.
+- Scheduled live TrueLayer bank sync route at `POST /api/scheduled/bank-sync` (legacy alias: `POST /api/bank-connections/scheduled-sync`), protected by `CRON_SECRET`.
 - Manual refresh-all endpoint at `POST /api/bank-connections/sync-all`.
 - Transaction reconciliation for pending-to-posted, provider updates, soft deletion, restoration, and reviewed user override preservation.
 - Privacy-safe transaction notifications for new activity, updates, large transactions, and potential duplicate payments.
@@ -47,7 +47,7 @@ Implemented locally:
 - Settings notification UX for iPhone Home Screen PWA guidance, permission status, push status, enable/disable, and test notification.
 - Netlify configuration in `netlify.toml` with the Netlify Next.js plugin and scheduled function directory.
 - Netlify scheduled function wrappers for scheduled notifications and scheduled bank sync.
-- Vercel Cron configuration in `vercel.json` for scheduled notifications and scheduled bank sync.
+- Vercel Cron configuration in `vercel.json` for scheduled live bank sync.
 - Server-only deployment readiness and environment validation modules under `src/lib/deployment`, including Netlify, Vercel, local, and unknown platform detection.
 - Safe readiness page at `/settings/system-readiness`.
 - Structured server logging helper under `src/lib/observability`.
@@ -172,7 +172,7 @@ OAuth/consent flow:
 - `GET /api/bank-connections/callback` verifies state, handles the provider callback server-side, stores only token placeholder metadata, creates audit/notification events, and redirects back to Settings / Connected Accounts.
 - `POST /api/bank-connections/[connectionId]/sync` retrieves server-side token metadata, calls the provider sync method where available, maps provider accounts and transactions, and upserts canonical records.
 - `POST /api/bank-connections/sync-all` manually refreshes all active visible connections for the signed-in user.
-- `POST /api/bank-connections/scheduled-sync` runs server-side scheduled fallback syncs for active, non-expired connections when the caller supplies `CRON_SECRET`.
+- `POST /api/scheduled/bank-sync` runs server-side scheduled live TrueLayer syncs for active, non-expired live connections when the caller supplies `CRON_SECRET`.
 - `POST /api/bank-connections/[connectionId]/revoke` disconnects the provider connection and revokes token placeholders.
 - `POST /api/bank-connections/webhook/moneyhub` validates a webhook signature or local stub signature, parses transaction/sync events, records idempotent provider webhook events, enqueues a connection or account sync, processes the sync server-side, records provider sync/audit events, and creates one privacy-safe notification for first-seen events.
 
@@ -290,7 +290,7 @@ The sync queue supports:
 
 Use Supabase for persistent webhook events and sync jobs when configured. Without Supabase, tests and local development use mock/in-memory fallback. Scheduled fallback sync should be configured with `CRON_SECRET`.
 
-Call scheduled sync with `Authorization: Bearer <CRON_SECRET>` or `x-cron-secret: <CRON_SECRET>`. The route skips disconnected, revoked, expired, re-consent, and recently synced connections to avoid excessive provider polling.
+Call scheduled sync with `Authorization: Bearer <CRON_SECRET>` or `x-cron-secret: <CRON_SECRET>`. The route syncs active live TrueLayer connections only and skips mock, sandbox, disconnected, revoked, expired, re-consent, and recently synced connections to avoid excessive provider polling.
 
 Transaction notifications remain privacy-safe outside the authenticated app. Browser-safe copy uses generic wording such as "New transaction detected", "Transaction updated", "Account connection needs attention", and "Potential duplicate payment".
 
@@ -622,8 +622,7 @@ Vercel Cron:
 
 `vercel.json` includes:
 
-- `/api/notifications/scheduled`
-- `/api/bank-connections/scheduled-sync`
+- `/api/scheduled/bank-sync`
 
 Supabase Cron option:
 

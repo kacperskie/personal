@@ -159,7 +159,7 @@ Netlify scheduled wrappers live in:
 They call existing protected API routes with `CRON_SECRET`:
 
 - `/api/notifications/scheduled`
-- `/api/bank-connections/scheduled-sync`
+- `/api/scheduled/bank-sync`
 
 Do not duplicate scheduled business logic in Netlify functions.
 

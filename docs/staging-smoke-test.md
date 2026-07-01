@@ -87,7 +87,7 @@ Use this checklist after deploying Personal Finance HQ to staging. Use fake/demo
 ## Scheduled Jobs
 
 - Call `/api/notifications/scheduled` with invalid secret and expect 401.
-- Call `/api/bank-connections/scheduled-sync` with invalid secret and expect 401.
+- Call `/api/scheduled/bank-sync` with invalid secret and expect 401.
 - Call both routes with staging cron secret and confirm safe JSON output.
 - Confirm Netlify scheduled function wrappers exist for notifications and bank sync.
 

@@ -179,6 +179,7 @@ export async function POST(
       recordProviderSyncEvent,
       updateBankConnectionStatus,
     },
+    syncTrigger: "manual",
   });
 
   for (const event of result.auditEvents) {

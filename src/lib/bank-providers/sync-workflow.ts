@@ -34,6 +34,8 @@ export type SyncWorkflowResult = {
   reason: string | null;
 };
 
+export type SyncTrigger = "manual" | "sync_all" | "scheduled" | "webhook";
+
 function syncEvent(
   connection: BankConnection,
   status: ProviderSyncEvent["status"],
@@ -104,8 +106,9 @@ function logTransactionSyncDiagnostics(input: {
     event: "provider_sync_event",
     message: "Provider transaction sync diagnostics.",
     metadata: {
-      connectionId: input.connection.id,
+      connectionIdSuffix: safeIdSuffix(input.connection.id),
       provider: input.connection.provider,
+      mode: input.connection.mode ?? null,
       endpointLabel: transactionEndpointLabel(input.providerAccount),
       pathTemplate: transactionPathTemplate(input.providerAccount),
       providerAccountIdSuffix: safeIdSuffix(input.providerAccount.providerAccountId),
@@ -126,12 +129,14 @@ export async function syncBankConnection({
   provider,
   providerContext,
   dependencies,
+  syncTrigger = "manual",
 }: {
   userId: string;
   connection: BankConnection;
   provider: OpenBankingProviderAdapter;
   providerContext?: ProviderRequestContext;
   dependencies: SyncWorkflowDependencies;
+  syncTrigger?: SyncTrigger;
 }): Promise<SyncWorkflowResult> {
   const startedAt = new Date().toISOString();
   const auditEvents: AuditEventInput[] = [
@@ -140,7 +145,7 @@ export async function syncBankConnection({
       eventType: "bank_connection_sync_started",
       entity: "bank_connections",
       entityId: connection.id,
-      metadata: { provider: connection.provider },
+      metadata: { provider: connection.provider, syncTrigger },
     },
   ];
   const syncEvents: ProviderSyncEvent[] = [];
@@ -255,6 +260,15 @@ export async function syncBankConnection({
       ...connection,
       status: "connected",
       lastSyncedAt: completedAt,
+      lastManualSyncAt:
+        syncTrigger === "manual" || syncTrigger === "sync_all"
+          ? completedAt
+          : connection.lastManualSyncAt ?? null,
+      lastAutomaticSyncAt:
+        syncTrigger === "scheduled" || syncTrigger === "webhook"
+          ? completedAt
+          : connection.lastAutomaticSyncAt ?? null,
+      lastSyncTrigger: syncTrigger,
       lastTransactionSyncedAt: completedAt,
       lastTransactionSyncStartedAt: startedAt,
       lastTransactionSyncStatus:
@@ -294,7 +308,7 @@ export async function syncBankConnection({
       eventType: "bank_connection_sync_completed",
       entity: "bank_connections",
       entityId: connection.id,
-      metadata: { accountsUpserted, transactionsUpserted },
+      metadata: { accountsUpserted, transactionsUpserted, syncTrigger },
     });
 
     return {
@@ -322,6 +336,15 @@ export async function syncBankConnection({
       status: "sync_failed",
       errorMessage: safeError.userMessage,
       updatedAt: failedAt,
+      lastManualSyncAt:
+        syncTrigger === "manual" || syncTrigger === "sync_all"
+          ? failedAt
+          : connection.lastManualSyncAt ?? null,
+      lastAutomaticSyncAt:
+        syncTrigger === "scheduled" || syncTrigger === "webhook"
+          ? failedAt
+          : connection.lastAutomaticSyncAt ?? null,
+      lastSyncTrigger: syncTrigger,
       lastTransactionSyncStartedAt: startedAt,
       lastTransactionSyncStatus: "failed",
       lastTransactionSyncMessage: safeError.userMessage,
@@ -349,7 +372,7 @@ export async function syncBankConnection({
       eventType: "bank_connection_sync_failed",
       entity: "bank_connections",
       entityId: connection.id,
-      metadata: { code: safeError.code },
+      metadata: { code: safeError.code, syncTrigger },
     });
 
     return {

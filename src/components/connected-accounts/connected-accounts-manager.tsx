@@ -901,6 +901,30 @@ export function ConnectedAccountsManager({
                   </dd>
                 </div>
                 <div>
+                  <dt className="text-ink/50">Last automatic sync</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {connection.lastAutomaticSyncAt
+                      ? formatConnectionTimestamp(connection.lastAutomaticSyncAt)
+                      : "Never"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink/50">Last manual sync</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {connection.lastManualSyncAt
+                      ? formatConnectionTimestamp(connection.lastManualSyncAt)
+                      : "Never"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink/50">Last transaction sync</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {connection.lastTransactionSyncedAt
+                      ? formatConnectionTimestamp(connection.lastTransactionSyncedAt)
+                      : "Never"}
+                  </dd>
+                </div>
+                <div>
                   <dt className="text-ink/50">Consent expires</dt>
                   <dd className="mt-1 font-semibold text-ink">
                     {connection.consentExpiresAt

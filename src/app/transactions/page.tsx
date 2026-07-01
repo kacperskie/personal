@@ -125,6 +125,12 @@ export default async function TransactionsPage() {
     count: visibleTransactions.filter((transaction) => transaction.accountId === account.id).length,
   }));
   const hiddenSandboxTransactionCount = liveMode ? sandboxTransactions.length : 0;
+  const pendingTransactionCount = visibleTransactions.filter(
+    (transaction) => transaction.pending || transaction.providerStatus === "pending",
+  ).length;
+  const newTransactionsSinceLastReview = visibleTransactions.filter(
+    (transaction) => transaction.status === "needs_review" || transaction.status === "suggested",
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -175,6 +181,14 @@ export default async function TransactionsPage() {
             <dt className="text-ink/50">Hidden sandbox transactions</dt>
             <dd className="mt-1 font-semibold text-ink">{hiddenSandboxTransactionCount}</dd>
           </div>
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <dt className="text-ink/50">New since review</dt>
+            <dd className="mt-1 font-semibold text-ink">{newTransactionsSinceLastReview}</dd>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <dt className="text-ink/50">Pending transactions</dt>
+            <dd className="mt-1 font-semibold text-ink">{pendingTransactionCount}</dd>
+          </div>
         </dl>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-line bg-paper p-4">
@@ -206,6 +220,17 @@ export default async function TransactionsPage() {
                     {connection.lastTransactionSyncMessage ? (
                       <p className="mt-1">{connection.lastTransactionSyncMessage}</p>
                     ) : null}
+                    <p className="mt-1 text-xs text-ink/55">
+                      Last automatic sync:{" "}
+                      {connection.lastAutomaticSyncAt
+                        ? formatDateShort(connection.lastAutomaticSyncAt.slice(0, 10))
+                        : "never"}
+                      {" - "}
+                      Last manual sync:{" "}
+                      {connection.lastManualSyncAt
+                        ? formatDateShort(connection.lastManualSyncAt.slice(0, 10))
+                        : "never"}
+                    </p>
                   </div>
                 ))
               ) : (

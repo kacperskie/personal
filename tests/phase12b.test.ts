@@ -115,7 +115,7 @@ describe("phase 12B Netlify staging deployment", () => {
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://finance-hq-staging.netlify.app/api/bank-connections/scheduled-sync"),
+      new URL("https://finance-hq-staging.netlify.app/api/scheduled/bank-sync"),
       expect.any(Object),
     );
   });

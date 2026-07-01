@@ -202,6 +202,9 @@ export type BankConnection = {
   consentCompletedAt?: string | null;
   consentExpiresAt: string | null;
   lastSyncedAt: string | null;
+  lastManualSyncAt?: string | null;
+  lastAutomaticSyncAt?: string | null;
+  lastSyncTrigger?: "manual" | "sync_all" | "scheduled" | "webhook" | null;
   lastTransactionSyncedAt?: string | null;
   lastTransactionSyncStartedAt?: string | null;
   lastTransactionSyncStatus?: "success" | "failed" | "no_transactions" | null;

@@ -16,6 +16,12 @@ export const runtime = "nodejs";
 
 const minimumSyncIntervalMs = 30 * 60 * 1000;
 
+function safeIdSuffix(value: string | null | undefined) {
+  if (!value) return "unknown";
+  const clean = value.replace(/[^a-zA-Z0-9]/g, "");
+  return clean.slice(-8) || "unknown";
+}
+
 function requestCronSecret(request: Request) {
   const authorization = request.headers.get("authorization") ?? "";
 
@@ -62,6 +68,23 @@ export function shouldSkipScheduledConnection(
   return false;
 }
 
+export function isScheduledLiveTrueLayerConnection(
+  connection: BankConnection,
+  now = new Date(),
+) {
+  const liveMode =
+    connection.mode === "live" ||
+    /live/i.test(`${connection.institutionId} ${connection.institutionName}`);
+
+  return (
+    connection.provider === "truelayer" &&
+    liveMode &&
+    (connection.status === "connected" || connection.status === "syncing") &&
+    connection.consentStatus === "active" &&
+    !shouldSkipScheduledConnection(connection, now)
+  );
+}
+
 async function processScheduledJob(job: SyncJob) {
   const record = await getServiceBankConnectionById(job.connectionId);
 
@@ -74,6 +97,7 @@ async function processScheduledJob(job: SyncJob) {
     connection: record.connection,
     accountIds: job.accountIds,
     createNotifications: true,
+    syncTrigger: "scheduled",
   });
 }
 
@@ -88,7 +112,7 @@ export async function POST(request: Request) {
   const now = new Date();
   const records = await getServiceActiveBankConnections();
   const eligible = records.filter((record) =>
-    !shouldSkipScheduledConnection(record.connection, now),
+    isScheduledLiveTrueLayerConnection(record.connection, now),
   );
 
   await Promise.all(
@@ -98,7 +122,11 @@ export async function POST(request: Request) {
         eventType: "bank_connection_scheduled_sync_started",
         entity: "bank_connections",
         entityId: record.connection.id,
-        metadata: { provider: record.connection.provider },
+        metadata: {
+          provider: record.connection.provider,
+          mode: record.connection.mode ?? "live",
+          connectionIdSuffix: safeIdSuffix(record.connection.id),
+        },
       }),
     ),
   );
@@ -139,15 +167,28 @@ export async function POST(request: Request) {
         metadata: {
           reason: job.reason,
           status: job.status,
+          connectionIdSuffix: safeIdSuffix(job.connectionId),
         },
       });
     }),
   );
 
+  const succeeded = processedJobs.filter((job) => job.status === "completed").length;
+  const failed = processedJobs.filter((job) => job.status === "failed").length;
+
   return NextResponse.json({
+    status: failed > 0 ? "partial" : "success",
     queued: jobs.length,
     processed: processedJobs.length,
     skipped: records.length - eligible.length,
+    succeeded,
+    failed,
+    connections: processedJobs.map((job) => ({
+      connectionIdSuffix: safeIdSuffix(job.connectionId),
+      provider: job.provider,
+      status: job.status,
+      resultCode: job.status === "failed" ? "sync_failed" : "sync_completed",
+    })),
   });
 }
 
