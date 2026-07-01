@@ -39,7 +39,12 @@ import {
   type TransactionBudgetTreatment,
 } from "@/lib/finance-interpretation";
 import { financeCategories } from "@/lib/transaction-intelligence";
+import { isCreditCardAccount } from "@/lib/finance-interpretation";
 import { planCreditCardRecategorisation } from "@/lib/transactions/recategorise";
+import {
+  partitionPendingSettlement,
+  pendingPreviewSpend,
+} from "@/lib/transactions/pending";
 import { formatCurrency, formatDateShort } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -137,6 +142,16 @@ export default async function TransactionsPage() {
   const pendingTransactionCount = visibleTransactions.filter(
     (transaction) => transaction.pending || transaction.providerStatus === "pending",
   ).length;
+  // Pending Amex/card preview: unsettled pending spend on credit-card accounts,
+  // shown separately from confirmed posted spend (never presented as confirmed).
+  const creditCardAccountIds = new Set(
+    visibleAccounts.filter((account) => isCreditCardAccount(account)).map((account) => account.id),
+  );
+  const pendingSettlement = partitionPendingSettlement(visibleTransactions);
+  const pendingCardPreviewSpend = pendingPreviewSpend(visibleTransactions, creditCardAccountIds);
+  const postedCardSpend = pendingSettlement.posted
+    .filter((t) => creditCardAccountIds.has(t.accountId) && t.kind === "expense")
+    .reduce((total, t) => total + Math.abs(t.amount), 0);
   const newTransactionsSinceLastReview = visibleTransactions.filter(
     (transaction) => transaction.status === "needs_review" || transaction.status === "suggested",
   ).length;
@@ -250,6 +265,29 @@ export default async function TransactionsPage() {
             <dd className="mt-1 font-semibold text-ink">{pendingTransactionCount}</dd>
           </div>
         </dl>
+        {creditCardAccountIds.size > 0 ? (
+          <div className="mt-4 rounded-lg border border-saffron/30 bg-saffron/10 p-4">
+            <p className="text-sm font-semibold text-ink">Amex / card pending preview</p>
+            <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+              <div>
+                <dt className="text-ink/55">Confirmed (posted) card spend</dt>
+                <dd className="mt-1 font-semibold text-ink">{formatCurrency(postedCardSpend)}</dd>
+              </div>
+              <div>
+                <dt className="text-ink/55">Pending card spend (preview)</dt>
+                <dd className="mt-1 font-semibold text-ink">{formatCurrency(pendingCardPreviewSpend)}</dd>
+              </div>
+              <div>
+                <dt className="text-ink/55">Settled pending (hidden, not double-counted)</dt>
+                <dd className="mt-1 font-semibold text-ink">{pendingSettlement.pendingSettled.length}</dd>
+              </div>
+            </dl>
+            <p className="mt-2 text-xs text-ink/55">
+              Pending transactions may change before posting. They are shown as a preview and are
+              not counted in confirmed monthly totals by default.
+            </p>
+          </div>
+        ) : null}
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-line bg-paper p-4">
             <p className="text-sm font-semibold text-ink">By connection</p>

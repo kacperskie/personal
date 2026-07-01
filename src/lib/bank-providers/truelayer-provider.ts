@@ -78,6 +78,12 @@ export type TrueLayerClientLike = {
   getBalances?(input: ProviderRequestContext): Promise<TrueLayerBalancePayload[]>;
   getCardBalances?(input: ProviderRequestContext): Promise<TrueLayerBalancePayload[]>;
   getTransactions(input: TransactionQuery): Promise<unknown[]>;
+  /**
+   * GET /data/v1/cards/{card_id}/transactions/pending — card pending transactions.
+   * The provider returns ALL pending transactions and does not accept a date range,
+   * so no from/to is sent. Optional (card-only capability).
+   */
+  getCardPendingTransactions?(input: TransactionQuery): Promise<unknown[]>;
   revokeConnection(input: ProviderRequestContext): Promise<void>;
 };
 
@@ -299,7 +305,13 @@ export function buildTrueLayerAuthorizationUrl({
   };
 }
 
-export type TrueLayerEndpoint = "me" | "accounts" | "cards" | "balance" | "transactions";
+export type TrueLayerEndpoint =
+  | "me"
+  | "accounts"
+  | "cards"
+  | "balance"
+  | "transactions"
+  | "cards_pending";
 
 // Path templates only (never the full URL with account ids / query params), so
 // diagnostics can name the endpoint without leaking identifiers.
@@ -309,6 +321,7 @@ const pathTemplateByEndpoint: Record<TrueLayerEndpoint, string> = {
   cards: "/data/v1/cards",
   balance: "/data/v1/accounts/{account_id}/balance",
   transactions: "/data/v1/accounts/{account_id}/transactions",
+  cards_pending: "/data/v1/cards/{card_id}/transactions/pending",
 };
 
 /**
@@ -655,6 +668,30 @@ async function defaultTrueLayerClientFactory(
           pathTemplate: isCard
             ? "/data/v1/cards/{card_id}/transactions"
             : "/data/v1/accounts/{account_id}/transactions",
+        },
+      );
+    },
+    async getCardPendingTransactions(input) {
+      const context = requireProviderContext(input);
+      const cardId = input.providerAccountId;
+
+      if (!cardId) {
+        return [];
+      }
+
+      // No from/to: the pending endpoint returns all pending transactions and does
+      // not accept a date range.
+      const url = new URL(`${config.apiBaseUrl}/data/v1/cards/${cardId}/transactions/pending`);
+
+      return fetchTrueLayer(
+        new Request(url, {
+          headers: { authorization: `Bearer ${context.tokenReference}` },
+        }),
+        {
+          endpoint: "cards_pending",
+          scopes: config.scopes,
+          mode: config.mode,
+          pathTemplate: "/data/v1/cards/{card_id}/transactions/pending",
         },
       );
     },
@@ -1213,12 +1250,54 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       payloads: rawTransactions,
     });
 
-    return rawTransactions.map((payload) =>
+    const posted = rawTransactions.map((payload) =>
       mapProviderTransactionPayload(
         truelayerTransactionPayload(payload, query?.providerAccountId),
         connectionId,
       ),
     );
+
+    // Card pending transactions: only for card accounts when cards are enabled and
+    // the scope is present/consented. The provider returns ALL pending (no date
+    // range). A pending failure is non-blocking and never fails the posted sync.
+    const isCard = query?.providerAccountType === "credit_card";
+    const cardsAllowed = this.config.cardsEnabled && this.config.scopes.includes("cards");
+
+    if (!isCard || !cardsAllowed || !client.getCardPendingTransactions) {
+      return posted;
+    }
+
+    let rawPending: unknown[] = [];
+    try {
+      rawPending = await client.getCardPendingTransactions({
+        providerAccountId: query?.providerAccountId,
+        providerAccountType: "credit_card",
+        tokenReference: providerContext.tokenReference,
+      });
+    } catch (error) {
+      const reason =
+        error instanceof ProviderSafeError
+          ? error.safeReason ?? "truelayer_cards_pending_unavailable"
+          : "truelayer_cards_pending_unavailable";
+      logServerEvent({
+        level: "warn",
+        event: "provider_sync_event",
+        message: "TrueLayer card pending sync skipped; pending is optional and non-blocking.",
+        metadata: { endpoint: "cards_pending", reason, nonBlocking: true },
+      });
+      return posted;
+    }
+
+    const pending = rawPending.map((payload) => {
+      const mapped = mapProviderTransactionPayload(
+        truelayerTransactionPayload(payload, query?.providerAccountId),
+        connectionId,
+      );
+      // Force pending status regardless of provider status field on this endpoint.
+      return { ...mapped, pending: true, providerStatus: "pending" as const };
+    });
+
+    return [...posted, ...pending];
   }
 
   async refreshConnection(
