@@ -414,26 +414,140 @@ export function providerAccountToAccount(
   };
 }
 
-function transactionKind(amount: number, isOwnAccountTransfer: boolean): CategoryKind {
+function transactionKind(
+  amount: number,
+  isOwnAccountTransfer: boolean,
+  isCreditCard = false,
+): CategoryKind {
   if (isOwnAccountTransfer) {
     return "transfer";
+  }
+
+  // Credit card: a positive amount is a purchase (spend/expense); a non-positive
+  // amount is a payment/refund/credit (a repayment/settlement, treated as a
+  // transfer so it is neither counted as spending nor as income).
+  if (isCreditCard) {
+    return amount > 0 ? "expense" : "transfer";
   }
 
   return amount >= 0 ? "income" : "expense";
 }
 
-export function deterministicProviderCategory(transaction: ProviderTransaction) {
-  const text = [
-    transaction.description,
-    transaction.merchant,
-    transaction.category,
-  ]
+/**
+ * Deterministic merchant → category from description/merchant text only. Returns
+ * null when no rule matches (caller decides the fallback). No income handling
+ * here — income is decided by the caller using account context + sign.
+ */
+function merchantCategoryFromText(text: string): string | null {
+  if (
+    text.includes("subscription") ||
+    text.includes("spotify") ||
+    text.includes("netflix") ||
+    text.includes("disney") ||
+    text.includes("prime video") ||
+    text.includes("apple.com/bill") ||
+    text.includes("youtube premium")
+  ) {
+    return "cat_bills_subscriptions";
+  }
+
+  if (
+    text.includes("direct debit") ||
+    text.includes("standing order") ||
+    text.includes("council tax") ||
+    text.includes("energy") ||
+    text.includes("utility") ||
+    text.includes("insurance")
+  ) {
+    return "cat_bills_subscriptions";
+  }
+
+  if (
+    text.includes("tesco") ||
+    text.includes("sainsbury") ||
+    text.includes("asda") ||
+    text.includes("morrisons") ||
+    text.includes("aldi") ||
+    text.includes("lidl") ||
+    text.includes("waitrose") ||
+    text.includes("grocery") ||
+    text.includes("supermarket")
+  ) {
+    return "cat_groceries";
+  }
+
+  if (
+    text.includes("train") ||
+    text.includes("trainline") ||
+    text.includes("rail") ||
+    text.includes("tfl") ||
+    text.includes("uber") ||
+    text.includes("bolt") ||
+    text.includes("fuel") ||
+    text.includes("petrol") ||
+    text.includes("parking") ||
+    text.includes("transport")
+  ) {
+    return "cat_transport";
+  }
+
+  if (
+    text.includes("restaurant") ||
+    text.includes("deliveroo") ||
+    text.includes("just eat") ||
+    text.includes("takeaway") ||
+    text.includes("mcdonald") ||
+    text.includes("greggs") ||
+    text.includes("pret") ||
+    text.includes("cafe") ||
+    text.includes("coffee") ||
+    text.includes("pub") ||
+    text.includes("bar ")
+  ) {
+    return "cat_eating_out_takeaway";
+  }
+
+  if (
+    text.includes("amazon") ||
+    text.includes("argos") ||
+    text.includes("ebay") ||
+    text.includes("asos") ||
+    text.includes("boots") ||
+    text.includes("superdrug") ||
+    text.includes("pharmacy") ||
+    text.includes("chemist") ||
+    text.includes("shop") ||
+    text.includes("store")
+  ) {
+    return "cat_personal";
+  }
+
+  return null;
+}
+
+export function deterministicProviderCategory(
+  transaction: ProviderTransaction,
+  options: { isCreditCard?: boolean } = {},
+) {
+  const text = [transaction.description, transaction.merchant, transaction.category]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 
   if (transaction.isOwnAccountTransfer || text.includes("transfer")) {
     return "cat_transfers";
+  }
+
+  // Credit cards (e.g. Amex) sign purchases as POSITIVE — a purchase increases
+  // the card liability. A positive amount here is spending, never income; a
+  // negative amount is a payment/refund/credit (repayment), never income.
+  if (options.isCreditCard) {
+    if (transaction.amount <= 0) {
+      return "cat_debt_payments";
+    }
+    // A purchase: use merchant rules; fall back to needs_review (cat_unknown)
+    // when uncertain — never cat_income.
+    return merchantCategoryFromText(text) ?? "cat_unknown";
   }
 
   if (transaction.amount > 0 || text.includes("salary") || text.includes("payroll")) {
@@ -458,66 +572,18 @@ export function deterministicProviderCategory(transaction: ProviderTransaction) 
     return "cat_savings";
   }
 
-  if (
-    text.includes("direct debit") ||
-    text.includes("standing order") ||
-    text.includes("subscription") ||
-    text.includes("council tax") ||
-    text.includes("energy") ||
-    text.includes("utility") ||
-    text.includes("insurance") ||
-    text.includes("spotify") ||
-    text.includes("netflix")
-  ) {
-    return "cat_bills_subscriptions";
-  }
-
-  if (
-    text.includes("tesco") ||
-    text.includes("sainsbury") ||
-    text.includes("asda") ||
-    text.includes("morrisons") ||
-    text.includes("aldi") ||
-    text.includes("lidl") ||
-    text.includes("waitrose") ||
-    text.includes("grocery") ||
-    text.includes("supermarket")
-  ) {
-    return "cat_groceries";
-  }
-
-  if (
-    text.includes("train") ||
-    text.includes("rail") ||
-    text.includes("tfl") ||
-    text.includes("uber") ||
-    text.includes("fuel") ||
-    text.includes("petrol") ||
-    text.includes("transport")
-  ) {
-    return "cat_transport";
-  }
-
-  if (
-    text.includes("restaurant") ||
-    text.includes("deliveroo") ||
-    text.includes("just eat") ||
-    text.includes("takeaway") ||
-    text.includes("cafe") ||
-    text.includes("coffee")
-  ) {
-    return "cat_eating_out_takeaway";
-  }
-
-  return "cat_unknown";
+  return merchantCategoryFromText(text) ?? "cat_unknown";
 }
 
 export function providerTransactionToTransaction(
   transaction: ProviderTransaction,
   accountId: string,
-  categoryId = deterministicProviderCategory(transaction),
-  now = new Date().toISOString(),
+  options: { isCreditCard?: boolean; categoryId?: string; now?: string } = {},
 ): Transaction {
+  const isCreditCard = options.isCreditCard ?? false;
+  const now = options.now ?? new Date().toISOString();
+  const categoryId =
+    options.categoryId ?? deterministicProviderCategory(transaction, { isCreditCard });
   const stableTransactionId = `txn_${transaction.providerConnectionId}_${accountId}_${transaction.providerTransactionId}`.replaceAll(
     /[^a-zA-Z0-9_]/g,
     "_",
@@ -538,7 +604,7 @@ export function providerTransactionToTransaction(
     description: transaction.description,
     amount: transaction.amount,
     currency: transaction.currency,
-    kind: transactionKind(transaction.amount, transaction.isOwnAccountTransfer),
+    kind: transactionKind(transaction.amount, transaction.isOwnAccountTransfer, isCreditCard),
     status: transaction.providerStatus === "deleted" ? "excluded" : transaction.pending ? "suggested" : "needs_review",
     flags: [
       ...(transaction.isOwnAccountTransfer ? ["own_account_transfer"] : []),

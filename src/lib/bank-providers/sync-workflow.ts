@@ -231,7 +231,9 @@ export async function syncBankConnection({
         }
 
         await dependencies.upsertTransaction(
-          providerTransactionToTransaction(providerTransaction, accountId),
+          providerTransactionToTransaction(providerTransaction, accountId, {
+            isCreditCard: providerAccount.type === "credit_card",
+          }),
         );
         transactionsUpserted += 1;
         storedForAccount += 1;
