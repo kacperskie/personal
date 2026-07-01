@@ -31,6 +31,7 @@ import type {
   TransactionQuery,
 } from "@/lib/bank-providers/types";
 import { saveProviderToken } from "@/lib/bank-providers/token-store";
+import { logServerEvent } from "@/lib/observability/server-logger";
 
 export type TrueLayerBalancePayload = {
   account_id?: string;
@@ -67,6 +68,18 @@ function futureIso(days: number) {
 
 function safeConnectionId() {
   return `conn_truelayer_${crypto.randomUUID()}`;
+}
+
+function redirectHostname(redirectUri: string | null | undefined) {
+  if (!redirectUri) {
+    return null;
+  }
+
+  try {
+    return new URL(redirectUri).hostname;
+  } catch {
+    return "invalid";
+  }
 }
 
 function safeMessageForConfig(config: TrueLayerProviderConfig) {
@@ -120,6 +133,42 @@ function requireProviderContext(context?: ProviderRequestContext | TransactionQu
   }
 
   return context;
+}
+
+export function buildTrueLayerAuthorizationUrl({
+  config,
+  redirectUri,
+  state,
+}: {
+  config: TrueLayerProviderConfig;
+  redirectUri: string;
+  state: string;
+}) {
+  const authorizationUrl = new URL(config.authBaseUrl);
+  const providers = config.sandboxMode ? ["uk-cs-mock"] : [];
+
+  authorizationUrl.searchParams.set("response_type", "code");
+  authorizationUrl.searchParams.set("client_id", config.clientId ?? "");
+  authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+  authorizationUrl.searchParams.set("scope", config.scopes.join(" "));
+  authorizationUrl.searchParams.set("state", state);
+
+  if (providers.length > 0) {
+    authorizationUrl.searchParams.set("providers", providers.join(" "));
+  }
+
+  return {
+    authorizationUrl,
+    diagnostics: {
+      host: authorizationUrl.hostname,
+      redirectUriPresent: Boolean(redirectUri),
+      redirectUriHostname: redirectHostname(redirectUri),
+      hasClientId: Boolean(config.clientId),
+      scopesList: config.scopes,
+      providersList: providers,
+      hasState: Boolean(state),
+    },
+  };
 }
 
 async function fetchJson(request: Request) {
@@ -377,6 +426,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       status: this.config.configured ? "connecting" : "not_connected",
       consentStatus: this.config.configured ? "pending" : "not_started",
       consentStartedAt: this.config.configured ? now : null,
+      consentCompletedAt: null,
       consentExpiresAt: null,
       lastSyncedAt: null,
       errorMessage: safeMessageForConfig(this.config),
@@ -403,14 +453,18 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       institutionName: input.institutionName || "TrueLayer sandbox",
       redirectUri,
     });
-    const authorizationUrl = new URL(`${this.config.authBaseUrl}/`);
+    const { authorizationUrl, diagnostics } = buildTrueLayerAuthorizationUrl({
+      config: this.config,
+      redirectUri,
+      state: attempt.state,
+    });
 
-    authorizationUrl.searchParams.set("response_type", "code");
-    authorizationUrl.searchParams.set("client_id", this.config.clientId ?? "");
-    authorizationUrl.searchParams.set("redirect_uri", redirectUri);
-    authorizationUrl.searchParams.set("scope", this.config.scopes.join(" "));
-    authorizationUrl.searchParams.set("state", attempt.state);
-    authorizationUrl.searchParams.set("nonce", attempt.nonce);
+    logServerEvent({
+      level: "info",
+      event: "provider_sync_event",
+      message: "TrueLayer auth URL diagnostics.",
+      metadata: diagnostics,
+    });
 
     return {
       connection,
@@ -482,6 +536,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         status: "connected",
         consentStatus: "active",
         consentStartedAt: now,
+        consentCompletedAt: now,
         consentExpiresAt: futureIso(90),
         lastSyncedAt: null,
         errorMessage: null,
@@ -505,6 +560,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       status: this.config.configured ? "connected" : "not_connected",
       consentStatus: this.config.configured ? "active" : "not_started",
       consentStartedAt: this.config.configured ? now : null,
+      consentCompletedAt: this.config.configured ? now : null,
       consentExpiresAt: this.config.configured ? futureIso(90) : null,
       lastSyncedAt: null,
       errorMessage: safeMessageForConfig(this.config),

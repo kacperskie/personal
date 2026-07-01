@@ -159,7 +159,7 @@ export function getTrueLayerProviderConfig(
     .map((scope) => scope.trim())
     .filter(Boolean);
   const sandboxMode =
-    env.OPEN_BANKING_PROVIDER === "truelayer" ||
+    env.TRUELAYER_SANDBOX_ENABLED === "true" ||
     apiBaseUrl.toLowerCase().includes("sandbox") ||
     authBaseUrl.toLowerCase().includes("sandbox");
   const openBankingEnabled =

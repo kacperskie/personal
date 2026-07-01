@@ -34,6 +34,22 @@ function labelStatus(status: string) {
   return status.replaceAll("_", " ");
 }
 
+export function isDeadPreConsentConnection(connection: BankConnection) {
+  const disconnectedOrRevoked =
+    connection.status === "disconnected" || connection.consentStatus === "revoked";
+
+  return disconnectedOrRevoked && !connection.lastSyncedAt && !connection.consentCompletedAt;
+}
+
+function isSyncDisabled(connection: BankConnection, isPending: boolean, isSyncingConnection: boolean) {
+  return (
+    isPending ||
+    isSyncingConnection ||
+    connection.status === "disconnected" ||
+    connection.consentStatus === "revoked"
+  );
+}
+
 export function ConnectedAccountsManager({
   connections,
   providerState,
@@ -58,11 +74,17 @@ export function ConnectedAccountsManager({
   const asOfDate = new Date().toISOString().slice(0, 10);
   const connectionsWithDisplayStatus = useMemo(
     () =>
-      connections.map((connection) => ({
-        ...connection,
-        displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
-      })),
+      connections
+        .filter((connection) => !isDeadPreConsentConnection(connection))
+        .map((connection) => ({
+          ...connection,
+          displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
+        })),
     [connections, asOfDate],
+  );
+  const hiddenFailedConsentAttempts = useMemo(
+    () => connections.filter(isDeadPreConsentConnection).length,
+    [connections],
   );
 
   async function postJson(url: string, body?: Record<string, unknown>) {
@@ -399,6 +421,16 @@ export function ConnectedAccountsManager({
             <p>{message}</p>
           </div>
         ) : null}
+
+        {hiddenFailedConsentAttempts > 0 ? (
+          <div className="mt-4 flex gap-3 rounded-lg border border-saffron/30 bg-saffron/10 p-4 text-sm text-ink/75">
+            <ShieldAlert className="h-5 w-5 shrink-0 text-saffron" aria-hidden="true" />
+            <p>
+              One or more previous consent attempts did not complete, so dead pending records are
+              hidden from the provider list.
+            </p>
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
@@ -509,7 +541,7 @@ export function ConnectedAccountsManager({
                 <button
                   type="button"
                   onClick={() => syncConnection(connection.id)}
-                  disabled={isPending || isSyncingConnection || connection.status === "disconnected"}
+                  disabled={isSyncDisabled(connection, isPending, isSyncingConnection)}
                   className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   <RefreshCw className={isSyncingConnection ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />

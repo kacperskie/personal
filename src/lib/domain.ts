@@ -150,6 +150,7 @@ export type BankConnection = {
   status: ConnectionLifecycleStatus;
   consentStatus: ConsentStatus;
   consentStartedAt: string | null;
+  consentCompletedAt?: string | null;
   consentExpiresAt: string | null;
   lastSyncedAt: string | null;
   errorMessage: string | null;

@@ -1,6 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConnectedAccountsManager } from "../src/components/connected-accounts/connected-accounts-manager";
+import {
+  ConnectedAccountsManager,
+  isDeadPreConsentConnection,
+} from "../src/components/connected-accounts/connected-accounts-manager";
 import type {
   Account,
   BankConnection,
@@ -15,6 +18,7 @@ import {
 import { getProviderAdapter } from "../src/lib/bank-providers/provider-service";
 import { syncBankConnection } from "../src/lib/bank-providers/sync-workflow";
 import {
+  buildTrueLayerAuthorizationUrl,
   TrueLayerProvider,
   truelayerAccountPayload,
   truelayerTransactionPayload,
@@ -41,6 +45,13 @@ const configuredTrueLayer: TrueLayerProviderConfig = {
   scopes: ["info", "accounts", "balance", "cards", "transactions", "offline_access"],
   configured: true,
   sandboxMode: true,
+};
+
+const liveTrueLayer: TrueLayerProviderConfig = {
+  ...configuredTrueLayer,
+  authBaseUrl: "https://auth.truelayer.com",
+  apiBaseUrl: "https://api.truelayer.com",
+  sandboxMode: false,
 };
 
 const baseConnection: BankConnection = {
@@ -261,6 +272,56 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(url.searchParams.get("scope")).toBe(configuredTrueLayer.scopes.join(" "));
     expect(url.searchParams.get("client_id")).toBe(configuredTrueLayer.clientId);
     expect(url.searchParams.get("state")).toBe(start.state);
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("providers")).toBe("uk-cs-mock");
+    expect(url.searchParams.has("nonce")).toBe(false);
+    expect(url.hostname).toBe("auth.truelayer-sandbox.com");
+  });
+
+  it("does not force the sandbox mock provider for live TrueLayer auth URLs", () => {
+    const { authorizationUrl } = buildTrueLayerAuthorizationUrl({
+      config: liveTrueLayer,
+      redirectUri: "https://finance-hq-alpha.vercel.app/api/bank-connections/callback",
+      state: "state_live",
+    });
+
+    expect(authorizationUrl.hostname).toBe("auth.truelayer.com");
+    expect(authorizationUrl.searchParams.get("providers")).toBeNull();
+  });
+
+  it("serialises TrueLayer auth URL scopes and redirect URI exactly", () => {
+    const redirectUri = "https://finance-hq-alpha.vercel.app/api/bank-connections/callback";
+    const { authorizationUrl } = buildTrueLayerAuthorizationUrl({
+      config: configuredTrueLayer,
+      redirectUri,
+      state: "state_exact",
+    });
+
+    expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(redirectUri);
+    expect(authorizationUrl.searchParams.get("scope")).toBe(
+      "info accounts balance cards transactions offline_access",
+    );
+  });
+
+  it("logs safe TrueLayer auth diagnostics without secrets or tokens", async () => {
+    const consoleSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
+
+    await provider.createConnection({
+      userId: "user_test",
+      institutionId: "truelayer_sandbox",
+      institutionName: "TrueLayer sandbox",
+    });
+
+    const logged = consoleSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+
+    expect(logged).toContain("auth.truelayer-sandbox.com");
+    expect(logged).toContain("uk-cs-mock");
+    expect(logged).toContain("redirectUriHostname");
+    expect(logged).not.toContain(configuredTrueLayer.clientSecret);
+    expect(logged).not.toContain("tl-access-token");
+    expect(logged).not.toContain("tl-refresh-token");
+    expect(logged).not.toContain("sandbox-code");
   });
 
   it("rejects invalid TrueLayer callback state", async () => {
@@ -421,5 +482,52 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(html).toContain("American Express");
     expect(html).toContain("Nationwide");
     expect(html).toContain("Revolut");
+  });
+
+  it("hides dead pre-consent records but keeps historical connected or synced records visible", () => {
+    const deadPending: BankConnection = {
+      ...baseConnection,
+      id: "conn_dead_pending",
+      status: "disconnected",
+      consentStatus: "revoked",
+      consentCompletedAt: null,
+      lastSyncedAt: null,
+    };
+    const historicalRevoked: BankConnection = {
+      ...baseConnection,
+      id: "conn_historical",
+      status: "disconnected",
+      consentStatus: "revoked",
+      consentCompletedAt: "2026-06-30T09:00:00.000Z",
+      lastSyncedAt: null,
+      institutionName: "Historical TrueLayer",
+    };
+    const syncedRevoked: BankConnection = {
+      ...baseConnection,
+      id: "conn_synced",
+      status: "disconnected",
+      consentStatus: "revoked",
+      consentCompletedAt: null,
+      lastSyncedAt: "2026-06-30T09:00:00.000Z",
+      institutionName: "Synced TrueLayer",
+    };
+    const html = renderToStaticMarkup(
+      <ConnectedAccountsManager
+        connections={[deadPending, historicalRevoked, syncedRevoked]}
+        providerState={{
+          provider: "truelayer",
+          configured: true,
+          safeMessage: "TrueLayer configured.",
+        }}
+      />,
+    );
+
+    expect(isDeadPreConsentConnection(deadPending)).toBe(true);
+    expect(isDeadPreConsentConnection(historicalRevoked)).toBe(false);
+    expect(isDeadPreConsentConnection(syncedRevoked)).toBe(false);
+    expect(html).toContain("dead pending records are");
+    expect(html).not.toContain("conn_dead_pending");
+    expect(html).toContain("Historical TrueLayer");
+    expect(html).toContain("Synced TrueLayer");
   });
 });
