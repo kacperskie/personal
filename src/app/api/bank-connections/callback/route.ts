@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
-import type { BankProvider } from "@/lib/domain";
+import type { BankConnection, BankProvider } from "@/lib/domain";
 import { createProviderNotification } from "@/lib/bank-providers/provider-notifications";
 import { createSafeErrorPayload, toProviderSafeError } from "@/lib/bank-providers/provider-errors";
 import { getOpenBankingProvider } from "@/lib/bank-providers/provider-config";
 import { getProviderAdapter } from "@/lib/bank-providers/provider-service";
-import { recordAuditEvent, upsertBankConnection } from "@/lib/repositories/finance-repository";
+import {
+  getBankConnectionById,
+  recordAuditEvent,
+  updateBankConnectionStatus,
+  upsertBankConnection,
+} from "@/lib/repositories/finance-repository";
 import { createNotification } from "@/lib/repositories/notification-repository";
 import {
   requireAuthenticatedRouteUser,
@@ -13,6 +18,34 @@ import {
 
 // Uses Firebase Admin/Firestore or session verification; force the Node.js runtime.
 export const runtime = "nodejs";
+
+function preferExistingIdentity(
+  existing: BankConnection,
+  incoming: BankConnection,
+): BankConnection {
+  return {
+    ...existing,
+    ...incoming,
+    id: existing.id,
+    userId: existing.userId ?? incoming.userId,
+    institutionName: existing.institutionName || incoming.institutionName,
+    institutionId: existing.institutionId || incoming.institutionId,
+    providerName: existing.providerName ?? incoming.providerName ?? null,
+    providerId: existing.providerId ?? incoming.providerId ?? null,
+    displayName: existing.displayName ?? incoming.displayName ?? null,
+    createdAt: existing.createdAt,
+    lastSyncedAt: existing.lastSyncedAt,
+    accountsSyncedCount: existing.accountsSyncedCount,
+    cardsSyncedCount: existing.cardsSyncedCount,
+    lastFailedSyncAt: null,
+    lastFailedEndpoint: null,
+    lastFailedStatus: null,
+    lastFailureReason: null,
+    errorMessage: null,
+    status: "connected",
+    consentStatus: "active",
+  };
+}
 
 export async function GET(request: Request) {
   const auth = await requireAuthenticatedRouteUser();
@@ -33,21 +66,34 @@ export async function GET(request: Request) {
       userId: auth.user.id,
     });
 
-    await upsertBankConnection(result.connection);
+    const savedConnection = result.reconnectConnectionId
+      ? await (async () => {
+          const existing = await getBankConnectionById(result.reconnectConnectionId!);
+
+          if (!existing) {
+            return upsertBankConnection(result.connection);
+          }
+
+          return updateBankConnectionStatus(
+            preferExistingIdentity(existing, result.connection),
+            "bank_connection_status_changed",
+          );
+        })()
+      : await upsertBankConnection(result.connection);
     await recordAuditEvent({
       userId: auth.user.id,
       eventType: "bank_connection_callback_handled",
       entity: "bank_connections",
-      entityId: result.connection.id,
-      metadata: { provider: providerName },
+      entityId: savedConnection.id,
+      metadata: { provider: providerName, reconnect: Boolean(result.reconnectConnectionId) },
     });
     await createNotification(
       createProviderNotification({
         userId: auth.user.id,
-        connection: result.connection,
+        connection: savedConnection,
         type: "connection_successful",
-        title: `${result.connection.institutionName} connected`,
-        body: "The sandbox connection completed successfully.",
+        title: `${savedConnection.institutionName} connected`,
+        body: "The connection completed successfully.",
         severity: "info",
       }),
     );

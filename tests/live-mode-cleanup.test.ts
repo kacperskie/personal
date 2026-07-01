@@ -32,8 +32,10 @@ import {
   canRemoveFailedConnectionAttempt,
   ConnectedAccountsManager,
   connectionDisplayTitle,
+  connectionReconnectPath,
   connectionRevokePath,
   failedAttemptRemovalPath,
+  requiresReconnect,
   shortConnectionId,
 } from "../src/components/connected-accounts/connected-accounts-manager";
 import { ProviderSafeError } from "../src/lib/bank-providers/provider-errors";
@@ -372,9 +374,54 @@ describe("per-connection live connection identity and cleanup", () => {
     expect(connectionRevokePath("conn_live_a")).toBe(
       "/api/bank-connections/conn_live_a/revoke",
     );
+    expect(connectionReconnectPath("conn_live_a")).toBe(
+      "/api/bank-connections/conn_live_a/reconnect",
+    );
     expect(failedAttemptRemovalPath("conn_live_b")).toBe(
       "/api/bank-connections/conn_live_b/failed-attempt",
     );
+  });
+
+  it("shows reconnect for revoked connections and disables sync", () => {
+    const revoked = connection({
+      id: "conn_revolut_revoked",
+      mode: "live",
+      providerName: "Revolut",
+      institutionName: "Revolut",
+      consentStatus: "revoked",
+      status: "disconnected",
+    });
+    const diagnostics = {
+      connectionId: revoked.id,
+      tokenRecordPresent: true,
+      tokenDecryptable: "yes" as const,
+      tokenLinkedToConnection: "yes" as const,
+      syncEligible: "no" as const,
+      reasonCode: "token_record_missing" as const,
+    };
+    const html = renderToStaticMarkup(
+      createElement(ConnectedAccountsManager, {
+        connections: [revoked],
+        tokenDiagnostics: { [revoked.id]: diagnostics },
+        connectionSummaries: {
+          [revoked.id]: {
+            connectionId: revoked.id,
+            linkedAccountCount: 1,
+            linkedTransactionCount: 3,
+            linkedAccountNames: ["Revolut Spending"],
+            linkedInstitutionNames: ["Revolut"],
+          },
+        },
+        providerState,
+      }),
+    );
+
+    expect(requiresReconnect(revoked, diagnostics)).toBe(true);
+    expect(html).toContain("Reconnect required");
+    expect(html).toContain("Reconnect");
+    expect(html).toContain("Sync eligible");
+    expect(html).toContain("disabled");
+    expect(html).not.toContain("live-secret-value");
   });
 
   it("identifies removable failed live attempts without including synced connections", () => {
@@ -549,6 +596,231 @@ describe("per-connection live connection identity and cleanup", () => {
     expect(store.get("conn_sandbox")?.status).toBe("disconnected");
     expect(store.get("conn_live")?.status).toBe("connected");
     expect(revokedTokens).toEqual(["conn_sandbox"]);
+  });
+
+  it("reconnecting Revolut starts auth for only the Revolut connection", async () => {
+    const store = new Map<string, BankConnection>([
+      [
+        "conn_revolut",
+        connection({
+          id: "conn_revolut",
+          mode: "live",
+          institutionName: "Revolut",
+          providerName: "Revolut",
+          status: "disconnected",
+          consentStatus: "revoked",
+        }),
+      ],
+      [
+        "conn_nationwide",
+        connection({
+          id: "conn_nationwide",
+          mode: "live",
+          institutionName: "Nationwide",
+          providerName: "Nationwide",
+          status: "disconnected",
+          consentStatus: "revoked",
+        }),
+      ],
+    ]);
+    const updated: BankConnection[] = [];
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async (id: string) => store.get(id) ?? null,
+      updateBankConnectionStatus: async (connection: BankConnection) => {
+        updated.push(connection);
+        store.set(connection.id, connection);
+        return connection;
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({
+      getProviderAdapter: () => ({
+        createConnection: async (input: {
+          reconnectConnectionId?: string;
+          existingConnection?: BankConnection;
+        }) => ({
+          connection: {
+            ...input.existingConnection!,
+            id: input.reconnectConnectionId!,
+            status: "connecting",
+            consentStatus: "pending",
+            updatedAt: "2026-07-01T12:00:00.000Z",
+          },
+          authorizationUrl: "https://auth.truelayer.com/?state=conn_revolut_state",
+          providerConfigured: true,
+          state: "conn_revolut_state",
+          safeMessage: null,
+        }),
+      }),
+    }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/reconnect/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_revolut/reconnect", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: "conn_revolut" }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.connectionId).toBe("conn_revolut");
+    expect(payload.authorizationUrl).toContain("state=conn_revolut_state");
+    expect(updated).toHaveLength(1);
+    expect(updated[0].id).toBe("conn_revolut");
+    expect(store.get("conn_revolut")?.status).toBe("connecting");
+    expect(store.get("conn_nationwide")?.status).toBe("disconnected");
+  });
+
+  it("reconnecting Nationwide does not affect Revolut", async () => {
+    const store = new Map<string, BankConnection>([
+      ["conn_revolut", connection({ id: "conn_revolut", mode: "live", institutionName: "Revolut" })],
+      [
+        "conn_nationwide",
+        connection({
+          id: "conn_nationwide",
+          mode: "live",
+          institutionName: "Nationwide",
+          status: "disconnected",
+          consentStatus: "revoked",
+        }),
+      ],
+    ]);
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async (id: string) => store.get(id) ?? null,
+      updateBankConnectionStatus: async (updated: BankConnection) => {
+        store.set(updated.id, updated);
+        return updated;
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({
+      getProviderAdapter: () => ({
+        createConnection: async (input: {
+          reconnectConnectionId?: string;
+          existingConnection?: BankConnection;
+        }) => ({
+          connection: {
+            ...input.existingConnection!,
+            id: input.reconnectConnectionId!,
+            status: "connecting",
+            consentStatus: "pending",
+            updatedAt: "2026-07-01T12:00:00.000Z",
+          },
+          authorizationUrl: "https://auth.truelayer.com/?state=conn_nationwide_state",
+          providerConfigured: true,
+          state: "conn_nationwide_state",
+          safeMessage: null,
+        }),
+      }),
+    }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/reconnect/route");
+    await POST(
+      new Request("http://localhost/api/bank-connections/conn_nationwide/reconnect", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: "conn_nationwide" }) },
+    );
+
+    expect(store.get("conn_nationwide")?.status).toBe("connecting");
+    expect(store.get("conn_revolut")?.status).toBe("connected");
+  });
+
+  it("callback with reconnectConnectionId updates existing connection only", async () => {
+    const existing = connection({
+      id: "conn_revolut",
+      mode: "live",
+      institutionName: "Revolut",
+      providerName: "Revolut",
+      status: "disconnected",
+      consentStatus: "revoked",
+      lastSyncedAt: "2026-07-01T09:00:00.000Z",
+      createdAt: "2026-06-30T09:00:00.000Z",
+      errorMessage: "Reconnect required before this bank connection can sync.",
+      lastFailureReason: "truelayer_token_rejected",
+      accountsSyncedCount: 1,
+    });
+    const updated: BankConnection[] = [];
+    const upserted: BankConnection[] = [];
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/bank-providers/provider-config", () => ({
+      getOpenBankingProvider: () => "truelayer",
+    }));
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({
+      getProviderAdapter: () => ({
+        handleCallback: async () => ({
+          reconnectConnectionId: "conn_revolut",
+          connection: {
+            ...existing,
+            institutionName: "TrueLayer live",
+            providerName: null,
+            status: "connected",
+            consentStatus: "active",
+            consentCompletedAt: "2026-07-01T12:00:00.000Z",
+            consentExpiresAt: "2026-09-29T12:00:00.000Z",
+            lastSyncedAt: null,
+            createdAt: "2026-07-01T12:00:00.000Z",
+            updatedAt: "2026-07-01T12:00:00.000Z",
+            errorMessage: null,
+          },
+          safeMessage: "TrueLayer callback handled.",
+        }),
+      }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async (id: string) => (id === existing.id ? existing : null),
+      updateBankConnectionStatus: async (connection: BankConnection) => {
+        updated.push(connection);
+        return connection;
+      },
+      upsertBankConnection: async (connection: BankConnection) => {
+        upserted.push(connection);
+        return connection;
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+
+    const { GET } = await import("../src/app/api/bank-connections/callback/route");
+    const response = await GET(
+      new Request("http://localhost/api/bank-connections/callback?code=auth-code&state=state"),
+    );
+
+    expect(response.status).toBe(307);
+    expect(upserted).toEqual([]);
+    expect(updated).toHaveLength(1);
+    expect(updated[0].id).toBe("conn_revolut");
+    expect(updated[0].institutionName).toBe("Revolut");
+    expect(updated[0].providerName).toBe("Revolut");
+    expect(updated[0].createdAt).toBe("2026-06-30T09:00:00.000Z");
+    expect(updated[0].lastSyncedAt).toBe("2026-07-01T09:00:00.000Z");
+    expect(updated[0].accountsSyncedCount).toBe(1);
+    expect(updated[0].status).toBe("connected");
+    expect(updated[0].consentStatus).toBe("active");
+    expect(updated[0].lastFailureReason).toBeNull();
   });
 
   it("removes a failed live attempt by exact connection id only", async () => {

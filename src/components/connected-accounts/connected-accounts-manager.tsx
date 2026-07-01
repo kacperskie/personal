@@ -114,6 +114,16 @@ export function isDeadPreConsentConnection(connection: BankConnection) {
   return disconnectedOrRevoked && !connection.lastSyncedAt && !connection.consentCompletedAt;
 }
 
+function hasLinkedSummary(summary?: ConnectionDisplaySummary) {
+  return Boolean(
+    summary &&
+      (summary.linkedAccountCount > 0 ||
+        summary.linkedTransactionCount > 0 ||
+        summary.linkedAccountNames.length > 0 ||
+        summary.linkedInstitutionNames.length > 0),
+  );
+}
+
 function isSyncDisabled(connection: BankConnection, isPending: boolean, isSyncingConnection: boolean) {
   return (
     isPending ||
@@ -121,10 +131,6 @@ function isSyncDisabled(connection: BankConnection, isPending: boolean, isSyncin
     connection.status === "disconnected" ||
     connection.consentStatus === "revoked"
   );
-}
-
-function needsReconnect(diagnostics?: ProviderTokenDiagnostics) {
-  return diagnostics ? diagnostics.syncEligible !== "yes" : false;
 }
 
 export function canRemoveFailedConnectionAttempt(
@@ -157,8 +163,28 @@ export function connectionRevokePath(connectionId: string) {
   return `/api/bank-connections/${connectionId}/revoke`;
 }
 
+export function connectionReconnectPath(connectionId: string) {
+  return `/api/bank-connections/${connectionId}/reconnect`;
+}
+
 export function failedAttemptRemovalPath(connectionId: string) {
   return `/api/bank-connections/${connectionId}/failed-attempt`;
+}
+
+export function requiresReconnect(
+  connection: BankConnection,
+  diagnostics?: ProviderTokenDiagnostics,
+) {
+  return (
+    connection.consentStatus === "revoked" ||
+    connection.consentStatus === "expired" ||
+    connection.lastFailureReason === "truelayer_token_rejected" ||
+    diagnostics?.syncEligible === "no" ||
+    diagnostics?.reasonCode === "token_record_missing" ||
+    diagnostics?.reasonCode === "token_decrypt_failed" ||
+    diagnostics?.reasonCode === "token_expired_refresh_missing" ||
+    diagnostics?.reasonCode === "token_refresh_failed"
+  );
 }
 
 export function ConnectedAccountsManager({
@@ -193,7 +219,11 @@ export function ConnectedAccountsManager({
   const connectionsWithDisplayStatus = useMemo(
     () =>
       connections
-        .filter((connection) => !isDeadPreConsentConnection(connection))
+        .filter(
+          (connection) =>
+            !isDeadPreConsentConnection(connection) ||
+            hasLinkedSummary(connectionSummaries[connection.id]),
+        )
         .map((connection) => ({
           ...connection,
           tokenDiagnostics: tokenDiagnostics[connection.id],
@@ -203,8 +233,13 @@ export function ConnectedAccountsManager({
     [connections, asOfDate, tokenDiagnostics, connectionSummaries],
   );
   const hiddenFailedConsentAttempts = useMemo(
-    () => connections.filter(isDeadPreConsentConnection).length,
-    [connections],
+    () =>
+      connections.filter(
+        (connection) =>
+          isDeadPreConsentConnection(connection) &&
+          !hasLinkedSummary(connectionSummaries[connection.id]),
+      ).length,
+    [connections, connectionSummaries],
   );
   const truelayerMode = providerState.truelayerReadiness?.mode ?? "sandbox";
   const truelayerLabel = truelayerMode === "live" ? "TrueLayer live" : "TrueLayer sandbox";
@@ -333,6 +368,22 @@ export function ConnectedAccountsManager({
             current.filter((candidate) => candidate !== connectionId),
           ),
         );
+    });
+  }
+
+  function reconnectConnection(connection: BankConnection) {
+    setMessage(null);
+    startTransition(() => {
+      void postJson(connectionReconnectPath(connection.id))
+        .then((payload) => {
+          if (payload.authorizationUrl) {
+            window.location.href = payload.authorizationUrl;
+            return;
+          }
+
+          setMessage(payload.message ?? "Reconnect started.");
+        })
+        .catch((error: Error) => setMessage(error.message));
     });
   }
 
@@ -761,7 +812,7 @@ export function ConnectedAccountsManager({
             <article key={connection.id} className="rounded-lg border border-line bg-paper p-4">
               {(() => {
                 const isSyncingConnection = syncingConnectionIds.includes(connection.id);
-                const reconnectRequired = needsReconnect(connection.tokenDiagnostics);
+                const reconnectRequired = requiresReconnect(connection, connection.tokenDiagnostics);
                 const summary = connection.summary;
                 const title = connectionDisplayTitle(connection, summary);
                 const displayLabel = reconnectRequired
@@ -966,6 +1017,17 @@ export function ConnectedAccountsManager({
                   <RefreshCw className={isSyncingConnection ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
                   {isSyncingConnection ? "Syncing" : "Sync"}
                 </button>
+                {reconnectRequired ? (
+                  <button
+                    type="button"
+                    onClick={() => reconnectConnection(connection)}
+                    disabled={isPending}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-teal px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    <Cable className="h-4 w-4" aria-hidden="true" />
+                    Reconnect
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => revokeConnection(connection, summary)}

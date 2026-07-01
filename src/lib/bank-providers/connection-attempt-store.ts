@@ -9,6 +9,7 @@ export type BankConnectionAttempt = {
   providerUserId: string;
   provider: BankProvider;
   connectionId: string;
+  reconnectConnectionId?: string;
   institutionId: string;
   institutionName: string;
   redirectUri: string;
@@ -28,6 +29,7 @@ export function createConnectionAttempt(input: {
   providerUserId: string;
   provider: BankProvider;
   connectionId: string;
+  reconnectConnectionId?: string;
   institutionId: string;
   institutionName: string;
   redirectUri: string;
@@ -41,6 +43,7 @@ export function createConnectionAttempt(input: {
     providerUserId: input.providerUserId,
     provider: input.provider,
     connectionId: input.connectionId,
+    reconnectConnectionId: input.reconnectConnectionId,
     institutionId: input.institutionId,
     institutionName: input.institutionName,
     redirectUri: input.redirectUri,

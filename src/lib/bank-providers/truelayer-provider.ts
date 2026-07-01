@@ -599,27 +599,28 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
 
   async createConnection(input: CreateConnectionInput): Promise<ProviderConnectionStart> {
     const now = nowIso();
-    const connectionId = safeConnectionId();
+    const connectionId = input.reconnectConnectionId ?? safeConnectionId();
     const redirectUri = input.redirectUri ?? this.config.redirectUri;
     // The environment (sandbox/live) is authoritative from server config - not
     // the client-supplied label - so live connections are recorded as live.
     const environment = trueLayerEnvironmentLabels(this.config.mode);
     const connection: BankConnection = {
+      ...input.existingConnection,
       id: connectionId,
-      userId: input.userId,
+      userId: input.existingConnection?.userId ?? input.userId,
       provider: "truelayer",
-      providerUserId: input.userId ?? null,
-      institutionName: environment.institutionName,
-      institutionId: environment.institutionId,
+      providerUserId: input.existingConnection?.providerUserId ?? input.userId ?? null,
+      institutionName: input.existingConnection?.institutionName ?? environment.institutionName,
+      institutionId: input.existingConnection?.institutionId ?? environment.institutionId,
       mode: this.config.mode,
       status: this.config.configured ? "connecting" : "not_connected",
       consentStatus: this.config.configured ? "pending" : "not_started",
       consentStartedAt: this.config.configured ? now : null,
-      consentCompletedAt: null,
+      consentCompletedAt: input.existingConnection?.consentCompletedAt ?? null,
       consentExpiresAt: null,
-      lastSyncedAt: null,
+      lastSyncedAt: input.existingConnection?.lastSyncedAt ?? null,
       errorMessage: safeMessageForConfig(this.config),
-      createdAt: now,
+      createdAt: input.existingConnection?.createdAt ?? now,
       updatedAt: now,
     };
 
@@ -638,8 +639,9 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       providerUserId: input.userId,
       provider: "truelayer",
       connectionId,
+      reconnectConnectionId: input.reconnectConnectionId,
       institutionId: environment.institutionId,
-      institutionName: environment.institutionName,
+      institutionName: connection.institutionName,
       redirectUri,
     });
     const { authorizationUrl, diagnostics } = buildTrueLayerAuthorizationUrl({
@@ -734,6 +736,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         createdAt: now,
         updatedAt: now,
       },
+      reconnectConnectionId: attempt.reconnectConnectionId,
       safeMessage: "TrueLayer callback handled.",
     };
   }

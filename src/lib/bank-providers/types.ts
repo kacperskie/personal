@@ -10,6 +10,8 @@ export type CreateConnectionInput = {
   institutionId: string;
   institutionName: string;
   redirectUri?: string;
+  reconnectConnectionId?: string;
+  existingConnection?: BankConnection;
 };
 
 export type ProviderConnectionStart = {
@@ -29,6 +31,7 @@ export type ProviderCallbackInput = {
 
 export type ProviderCallbackResult = {
   connection: BankConnection;
+  reconnectConnectionId?: string;
   safeMessage: string | null;
 };
 

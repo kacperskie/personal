@@ -493,6 +493,56 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(preflight.record.connectionId).toBe(callback.connection.id);
   });
 
+  it("reconnect callback reuses the existing TrueLayer connection and replaces its token", async () => {
+    vi.stubEnv("TOKEN_ENCRYPTION_KEY", "x".repeat(32));
+    const existingConnection: BankConnection = {
+      ...baseConnection,
+      id: "conn_revolut_existing",
+      institutionName: "Revolut",
+      institutionId: "truelayer_live",
+      mode: "live",
+      status: "disconnected",
+      consentStatus: "revoked",
+      errorMessage: "Reconnect required before this bank connection can sync.",
+    };
+    const provider = new TrueLayerProvider(liveTrueLayer, async () =>
+      truelayerClient({
+        exchangeCodeForTokens: vi.fn(async () => ({
+          access_token: "new-reconnect-access-token",
+          refresh_token: "new-reconnect-refresh-token",
+          expires_in: 3600,
+          sub: "tl_user_reconnected",
+        })),
+      }),
+    );
+    const start = await provider.createConnection({
+      userId: "user_reconnect",
+      institutionId: existingConnection.institutionId,
+      institutionName: existingConnection.institutionName,
+      reconnectConnectionId: existingConnection.id,
+      existingConnection,
+    });
+    const callback = await provider.handleCallback({
+      code: "reconnect-code",
+      state: start.state,
+      userId: "user_reconnect",
+    });
+    const token = await getProviderToken("user_reconnect", existingConnection.id);
+
+    expect(start.connection.id).toBe(existingConnection.id);
+    expect(start.state).toContain(existingConnection.id);
+    expect(callback.reconnectConnectionId).toBe(existingConnection.id);
+    expect(callback.connection.id).toBe(existingConnection.id);
+    expect(callback.connection.status).toBe("connected");
+    expect(token?.connectionId).toBe(existingConnection.id);
+    expect(token?.status).toBe("active");
+    expect(token?.providerUserId).toBe("tl_user_reconnected");
+    expect(token?.tokenReference).toBeTruthy();
+    expect(token?.encryptedTokenPayload).toBeTruthy();
+    expect(JSON.stringify(toClientSafeTokenRecord(token))).not.toContain("new-reconnect-access-token");
+    expect(JSON.stringify(toClientSafeTokenRecord(token))).not.toContain("new-reconnect-refresh-token");
+  });
+
   it("syncs TrueLayer mocked accounts and transactions through the generic workflow", async () => {
     const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
     const accounts = new Map<string, Account>();
