@@ -10,13 +10,25 @@ export class ProviderSafeError extends Error {
   code: ProviderErrorCode;
   status: number;
   userMessage: string;
+  /**
+   * Optional machine-readable, non-secret reason for the failure (e.g.
+   * "truelayer_scope_or_permission_denied"). Used for safe diagnostics/tests and
+   * surfaced to the UI to distinguish token problems from provider access denial.
+   */
+  safeReason?: string;
 
-  constructor(code: ProviderErrorCode, userMessage: string, status = 400) {
+  constructor(
+    code: ProviderErrorCode,
+    userMessage: string,
+    status = 400,
+    safeReason?: string,
+  ) {
     super(userMessage);
     this.name = "ProviderSafeError";
     this.code = code;
     this.status = status;
     this.userMessage = userMessage;
+    this.safeReason = safeReason;
   }
 }
 

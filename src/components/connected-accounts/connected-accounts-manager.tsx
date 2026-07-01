@@ -590,6 +590,31 @@ export function ConnectedAccountsManager({
                   </>
                 ) : null}
               </dl>
+              {connection.status === "sync_failed" && connection.errorMessage ? (
+                (() => {
+                  const tokenHealthy = connection.tokenDiagnostics?.syncEligible === "yes";
+                  return (
+                    <div
+                      className={`mt-4 rounded-lg border p-3 text-sm text-ink/80 ${
+                        tokenHealthy
+                          ? "border-berry/30 bg-berry/10"
+                          : "border-saffron/30 bg-saffron/10"
+                      }`}
+                    >
+                      <p className="font-semibold text-ink">
+                        {tokenHealthy ? "Provider access denied" : "Connection needs attention"}
+                      </p>
+                      <p className="mt-1">{connection.errorMessage}</p>
+                      {tokenHealthy ? (
+                        <p className="mt-1 text-ink/60">
+                          Token diagnostics look healthy, so this is a provider
+                          access/permission response, not a token problem.
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })()
+              ) : null}
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   type="button"

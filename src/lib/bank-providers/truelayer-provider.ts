@@ -47,6 +47,12 @@ export type TrueLayerClientLike = {
     redirectUri: string;
   }): Promise<unknown>;
   refreshConnection(input: ProviderRequestContext): Promise<void>;
+  /**
+   * GET /data/v1/me — first sync diagnostic request. Confirms the token is valid
+   * and (per TrueLayer) reveals safe identity/consent metadata. Optional so mock
+   * clients in tests need not implement it.
+   */
+  getMe?(input: ProviderRequestContext): Promise<unknown[]>;
   getAccounts(input: ProviderRequestContext): Promise<unknown[]>;
   getCards?(input: ProviderRequestContext): Promise<unknown[]>;
   getBalances?(input: ProviderRequestContext): Promise<TrueLayerBalancePayload[]>;
@@ -171,30 +177,115 @@ export function buildTrueLayerAuthorizationUrl({
   };
 }
 
-async function fetchJson(
+export type TrueLayerEndpoint = "me" | "accounts" | "cards" | "balance" | "transactions";
+
+// Path templates only (never the full URL with account ids / query params), so
+// diagnostics can name the endpoint without leaking identifiers.
+const pathTemplateByEndpoint: Record<TrueLayerEndpoint, string> = {
+  me: "/data/v1/me",
+  accounts: "/data/v1/accounts",
+  cards: "/data/v1/cards",
+  balance: "/data/v1/accounts/{account_id}/balance",
+  transactions: "/data/v1/accounts/{account_id}/transactions",
+};
+
+/**
+ * Extract only the safe, non-secret error identifiers from a TrueLayer error
+ * body (the enum `error` code, and problem+json `title`/`type`). The raw body is
+ * never returned or logged.
+ */
+function extractSafeTrueLayerError(body: string): {
+  code: string | null;
+  title: string | null;
+  type: string | null;
+} {
+  try {
+    const json = JSON.parse(body) as Record<string, unknown>;
+    return {
+      code: typeof json.error === "string" ? json.error : null,
+      title: typeof json.title === "string" ? json.title : null,
+      type: typeof json.type === "string" ? json.type : null,
+    };
+  } catch {
+    return { code: null, title: null, type: null };
+  }
+}
+
+/**
+ * Map (endpoint, HTTP status) to a safe machine reason + actionable user message.
+ * A 403 on /me is a connection-level access denial; a 403 on a data endpoint is a
+ * scope/permission denial. Neither implies the token is missing.
+ */
+export function classifyTrueLayerFailure(
+  endpoint: TrueLayerEndpoint,
+  status: number,
+): { reason: string; message: string } {
+  if (status === 403) {
+    if (endpoint === "me") {
+      return {
+        reason: "truelayer_connection_access_denied",
+        message:
+          "TrueLayer denied connection access. Reconnect the sandbox account and confirm the app has Data API access.",
+      };
+    }
+
+    return {
+      reason: "truelayer_scope_or_permission_denied",
+      message: "TrueLayer denied account access. Check app Data API permissions and scopes.",
+    };
+  }
+
+  if (status === 401) {
+    return {
+      reason: "truelayer_token_rejected",
+      message: "TrueLayer rejected the access token. Reconnect the sandbox account.",
+    };
+  }
+
+  return {
+    reason: `truelayer_${endpoint}_fetch_failed`,
+    message: `TrueLayer sandbox ${endpoint} request failed (status ${status}).`,
+  };
+}
+
+async function fetchTrueLayer(
   request: Request,
-  failureReason:
-    | "truelayer_accounts_fetch_failed"
-    | "truelayer_balances_fetch_failed"
-    | "truelayer_transactions_fetch_failed",
+  options: { endpoint: TrueLayerEndpoint; scopes: string[] },
 ) {
   const response = await fetch(request);
+  const pathTemplate = pathTemplateByEndpoint[options.endpoint];
 
   if (!response.ok) {
+    // Read the body only to extract safe error identifiers; never log the body.
+    const body = await response.text().catch(() => "");
+    const safe = extractSafeTrueLayerError(body);
+    const { reason, message } = classifyTrueLayerFailure(options.endpoint, response.status);
+
     logServerEvent({
       level: "warn",
       event: "provider_sync_event",
       message: "TrueLayer fetch failed.",
       metadata: {
-        reason: failureReason,
+        // Short, redaction-safe fields (the previous long `reason` string tripped
+        // the logger's [A-Za-z0-9_-]{24,} redactor and rendered as [redacted-id]).
+        endpoint: options.endpoint,
         status: response.status,
         host: new URL(request.url).hostname,
+        pathTemplate,
+        tlErrorCode: safe.code,
+        tlErrorTitle: safe.title,
+        tlErrorType: safe.type,
+        scopesAccounts: options.scopes.includes("accounts"),
+        scopesBalance: options.scopes.includes("balance"),
+        scopesTransactions: options.scopes.includes("transactions"),
       },
     });
+
     throw new ProviderSafeError(
       "provider_sync_failed",
-      "TrueLayer sandbox request failed. No provider credentials were exposed.",
-      502,
+      message,
+      response.status >= 500 ? 502 : response.status,
+      reason,
     );
   }
 
@@ -233,22 +324,31 @@ async function defaultTrueLayerClientFactory(
     async refreshConnection() {
       return undefined;
     },
+    async getMe(input) {
+      const context = requireProviderContext(input);
+      return fetchTrueLayer(
+        new Request(`${config.apiBaseUrl}/data/v1/me`, {
+          headers: { authorization: `Bearer ${context.tokenReference}` },
+        }),
+        { endpoint: "me", scopes: config.scopes },
+      );
+    },
     async getAccounts(input) {
       const context = requireProviderContext(input);
-      return fetchJson(
+      return fetchTrueLayer(
         new Request(`${config.apiBaseUrl}/data/v1/accounts`, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
-        "truelayer_accounts_fetch_failed",
+        { endpoint: "accounts", scopes: config.scopes },
       );
     },
     async getCards(input) {
       const context = requireProviderContext(input);
-      return fetchJson(
+      return fetchTrueLayer(
         new Request(`${config.apiBaseUrl}/data/v1/cards`, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
-        "truelayer_accounts_fetch_failed",
+        { endpoint: "cards", scopes: config.scopes },
       );
     },
     async getBalances(input) {
@@ -256,11 +356,11 @@ async function defaultTrueLayerClientFactory(
       const accountIds = context.providerAccountIds ?? [];
       const balances = await Promise.all(
         accountIds.map(async (accountId: string) => {
-          const rows = await fetchJson(
+          const rows = await fetchTrueLayer(
             new Request(`${config.apiBaseUrl}/data/v1/accounts/${accountId}/balance`, {
               headers: { authorization: `Bearer ${context.tokenReference}` },
             }),
-            "truelayer_balances_fetch_failed",
+            { endpoint: "balance", scopes: config.scopes },
           );
 
           return rows.map((row) => ({
@@ -290,11 +390,11 @@ async function defaultTrueLayerClientFactory(
         url.searchParams.set("to", input.dateTo);
       }
 
-      return fetchJson(
+      return fetchTrueLayer(
         new Request(url, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
-        "truelayer_transactions_fetch_failed",
+        { endpoint: "transactions", scopes: config.scopes },
       );
     },
     async revokeConnection() {
@@ -595,6 +695,12 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
   ): Promise<ProviderAccount[]> {
     const providerContext = requireProviderContext(context);
     const client = await this.getClient();
+    // First sync diagnostic: confirm token validity + connection access via
+    // /data/v1/me before requesting account data. A 403 here is classified as a
+    // connection-access denial (not a missing token) by fetchTrueLayer.
+    if (client.getMe) {
+      await client.getMe(providerContext);
+    }
     const rawAccounts = await client.getAccounts(providerContext);
     const rawCards = client.getCards ? await client.getCards(providerContext) : [];
     const accountIds = [...rawAccounts, ...rawCards]

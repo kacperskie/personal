@@ -205,15 +205,10 @@ export async function POST(
       connectionId: result.connection.id,
       provider: result.connection.provider,
     });
-  } else if (connection.provider === "truelayer") {
-    logSyncReason({
-      level: "warn",
-      reason: "truelayer_accounts_fetch_failed",
-      userId: auth.user.id,
-      connectionId: result.connection.id,
-      provider: result.connection.provider,
-    });
   }
+  // On failure the precise endpoint/status is already logged by the provider
+  // client (fetchTrueLayer) with safe, redaction-proof fields; we avoid a second
+  // misleading hardcoded "accounts" reason here.
 
   return NextResponse.json({
     status: result.status,
@@ -221,5 +216,6 @@ export async function POST(
     accountsUpserted: result.accountsUpserted,
     transactionsUpserted: result.transactionsUpserted,
     message: result.safeMessage,
+    reason: result.reason,
   });
 }

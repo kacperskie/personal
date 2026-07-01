@@ -28,6 +28,8 @@ export type SyncWorkflowResult = {
   syncEvents: ProviderSyncEvent[];
   auditEvents: AuditEventInput[];
   safeMessage: string;
+  /** Safe, non-secret machine reason for a failure (null on success). */
+  reason: string | null;
 };
 
 function syncEvent(
@@ -161,6 +163,7 @@ export async function syncBankConnection({
       syncEvents,
       auditEvents,
       safeMessage: "Connection synced successfully.",
+      reason: null,
     };
   } catch (error) {
     const safeError = toProviderSafeError(error, "provider_sync_failed");
@@ -197,6 +200,7 @@ export async function syncBankConnection({
       syncEvents,
       auditEvents,
       safeMessage: safeError.userMessage,
+      reason: safeError.safeReason ?? safeError.code,
     };
   }
 }
