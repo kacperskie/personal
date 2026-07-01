@@ -71,6 +71,13 @@ import {
 } from "@/lib/mock-data";
 import { logServerEvent } from "@/lib/observability/server-logger";
 import {
+  isLiveTrueLayerMode,
+  isSandboxAccount,
+  isSandboxConnection,
+  liveConnectionIdSet,
+  sandboxConnectionIdSet,
+} from "@/lib/bank-providers/sandbox-data";
+import {
   type FirebaseAuthenticatedContext,
   getFirebaseAuthenticatedContext,
   getFirebaseCollectionForContext,
@@ -621,6 +628,38 @@ function explicitMockFallbackEnabled(env: NodeJS.ProcessEnv) {
   return env.MOCK_DATA_FALLBACK_ENABLED === "true";
 }
 
+/**
+ * In live TrueLayer mode, exclude sandbox/mock accounts, their transactions, and
+ * sandbox connections so live totals never include stale test data. Live records
+ * are always preserved.
+ */
+export function applyLiveModeDashboardFilter(
+  data: DashboardSummaryData,
+  env: NodeJS.ProcessEnv = process.env,
+): DashboardSummaryData {
+  if (!isLiveTrueLayerMode(env)) {
+    return data;
+  }
+
+  const sandboxConnectionIds = sandboxConnectionIdSet(data.bankConnections);
+  const liveConnectionIds = liveConnectionIdSet(data.bankConnections);
+  const liveAccounts = data.accounts.filter(
+    (account) => !isSandboxAccount(account, sandboxConnectionIds, liveConnectionIds),
+  );
+  const liveAccountIds = new Set(liveAccounts.map((account) => account.id));
+
+  return {
+    ...data,
+    accounts: liveAccounts,
+    transactions: data.transactions.filter((transaction) =>
+      liveAccountIds.has(transaction.accountId),
+    ),
+    bankConnections: data.bankConnections.filter(
+      (connection) => !isSandboxConnection(connection),
+    ),
+  };
+}
+
 export async function getDashboardViewModel(
   env: NodeJS.ProcessEnv = process.env,
   asOfDate = isoToday(),
@@ -648,7 +687,7 @@ export async function getDashboardViewModel(
       };
     }
 
-    return buildFirebaseDashboardModel(data, asOfDate);
+    return buildFirebaseDashboardModel(applyLiveModeDashboardFilter(data, env), asOfDate);
   } catch (error) {
     logServerEvent({
       level: "error",

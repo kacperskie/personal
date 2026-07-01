@@ -63,6 +63,7 @@ export type AccountPurpose =
   | "everyday_spending"
   | "emergency_fund"
   | "short_term_savings"
+  | "pocket"
   | "holiday_fund"
   | "pet_fund"
   | "house_deposit"

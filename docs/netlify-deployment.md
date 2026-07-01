@@ -98,6 +98,26 @@ deployment. Legacy `supabase/migrations/*` remain only as archived references.
 - Confirm sign-in, sign-out, and protected route redirects.
 - Keep RLS enabled on all user-owned tables.
 
+## Production Live Mode And Sandbox Cleanup
+
+The primary production deployment is Vercel + Firebase + TrueLayer live data.
+
+- Live mode: `OPEN_BANKING_ENABLED=true`, `OPEN_BANKING_PROVIDER=truelayer`,
+  `TRUELAYER_SANDBOX_ENABLED=false` (uses `auth.truelayer.com`/`api.truelayer.com`,
+  no `uk-cs-mock`), and `MOCK_DATA_FALLBACK_ENABLED=false` so the dashboard/accounts
+  never show seeded mock figures. Set **live** TrueLayer client id/secret (must not
+  start with `sandbox-`; the Connected Accounts readiness card warns if they do).
+- Sandbox mode is for testing only: `TRUELAYER_SANDBOX_ENABLED=true` with sandbox
+  credentials.
+- Cards remain optional and off by default (`TRUELAYER_CARDS_ENABLED=false`).
+- Cleaning up old sandbox/mock data: after switching to live, open
+  **Settings → Connected Accounts → Clean up sandbox data**. It previews the count
+  of sandbox connections, accounts, transactions, token records, and sync runs,
+  and removes only the signed-in user's sandbox/mock records under `users/{uid}`.
+  Live TrueLayer connections, tokens, accounts, and transactions are never touched.
+  In live mode, sandbox accounts are already excluded from dashboard/account totals
+  and sandbox connections are collapsed under "Old sandbox/test data".
+
 ## Open Banking Redirects And Webhooks
 
 TrueLayer:

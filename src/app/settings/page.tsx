@@ -100,7 +100,7 @@ export default async function SettingsPage() {
           <Activity className="h-5 w-5 text-teal" aria-hidden="true" />
           <h2 className="mt-4 text-base font-semibold text-ink">System readiness</h2>
           <p className="mt-2 text-sm leading-6 text-ink/70">
-            Review safe staging checks for Firebase, Firestore, TrueLayer sandbox, OpenAI,
+            Review safe deployment checks for Firebase, Firestore, TrueLayer, OpenAI,
             Web Push, cron protection, redirects, and webhook setup.
           </p>
           <Link

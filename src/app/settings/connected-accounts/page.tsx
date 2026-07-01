@@ -8,6 +8,7 @@ import { getProviderConfiguredState } from "@/lib/bank-providers/provider-config
 import { getProviderTokenDiagnostics } from "@/lib/bank-providers/token-store";
 import { getFirebaseSessionUser } from "@/lib/firebase/session";
 import { getBankConnections } from "@/lib/repositories/finance-repository";
+import { previewSandboxCleanup } from "@/lib/repositories/sandbox-cleanup";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,9 @@ export default async function ConnectedAccountsPage() {
   const tokenDiagnostics = Object.fromEntries(tokenDiagnosticsEntries);
   const providerState = getProviderConfiguredState();
   const truelayerMode = providerState.truelayerReadiness?.mode ?? "sandbox";
+  const sandboxCleanupPreview = user
+    ? await previewSandboxCleanup(user.uid)
+    : { connections: 0, accounts: 0, transactions: 0, providerTokens: 0, syncRuns: 0 };
   const asOfDate = new Date().toISOString().slice(0, 10);
   const connectionsWithDisplayStatus = bankConnections.map((connection) => ({
     ...connection,
@@ -103,6 +107,7 @@ export default async function ConnectedAccountsPage() {
         connections={bankConnections}
         tokenDiagnostics={tokenDiagnostics}
         providerState={providerState}
+        sandboxCleanupPreview={sandboxCleanupPreview}
       />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">

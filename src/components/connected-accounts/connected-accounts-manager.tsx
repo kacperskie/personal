@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Cable, RefreshCw, ShieldAlert, Unplug } from "lucide-react";
+import { Cable, RefreshCw, ShieldAlert, Trash2, Unplug } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import type { BankConnection, BankProvider, ConnectionLifecycleStatus } from "@/lib/domain";
 import type {
@@ -10,8 +10,17 @@ import type {
   TrueLayerSandboxReadiness,
 } from "@/lib/bank-providers/provider-config";
 import type { ProviderTokenDiagnostics } from "@/lib/bank-providers/token-store";
+import { isSandboxConnection } from "@/lib/bank-providers/sandbox-data";
 import { formatDateShort } from "@/lib/format";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
+
+type SandboxCleanupPreview = {
+  connections: number;
+  accounts: number;
+  transactions: number;
+  providerTokens: number;
+  syncRuns: number;
+};
 
 const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warning" | "risk"> = {
   not_connected: "neutral",
@@ -59,6 +68,7 @@ export function ConnectedAccountsManager({
   connections,
   tokenDiagnostics = {},
   providerState,
+  sandboxCleanupPreview,
 }: {
   connections: BankConnection[];
   tokenDiagnostics?: Record<string, ProviderTokenDiagnostics>;
@@ -70,6 +80,7 @@ export function ConnectedAccountsManager({
     truelayerReadiness?: TrueLayerSandboxReadiness;
     providerComparison?: ProviderComparisonCapability[];
   };
+  sandboxCleanupPreview?: SandboxCleanupPreview;
 }) {
   const [selectedProvider, setSelectedProvider] = useState<BankProvider>(
     providerState.provider === "mock" ? "moneyhub" : providerState.provider,
@@ -96,9 +107,51 @@ export function ConnectedAccountsManager({
   );
   const truelayerMode = providerState.truelayerReadiness?.mode ?? "sandbox";
   const truelayerLabel = truelayerMode === "live" ? "TrueLayer live" : "TrueLayer sandbox";
-  const resolvedProviderOptions = providerOptions.map((option) =>
-    option.value === "truelayer" ? { ...option, label: truelayerLabel } : option,
-  );
+  const isTrueLayerProvider = providerState.provider === "truelayer";
+  const liveMode = isTrueLayerProvider && truelayerMode === "live";
+  // In production live mode only TrueLayer live is offered; Moneyhub sandbox and
+  // the mock provider are hidden unless dev/mock mode is active (provider !== truelayer).
+  const resolvedProviderOptions = (liveMode
+    ? providerOptions.filter((option) => option.value === "truelayer")
+    : providerOptions
+  ).map((option) => (option.value === "truelayer" ? { ...option, label: truelayerLabel } : option));
+  const showMoneyhubReadiness = Boolean(providerState.moneyhubReadiness) && !isTrueLayerProvider;
+  const providerComparison = liveMode
+    ? providerState.providerComparison?.filter((provider) => provider.provider === "truelayer")
+    : providerState.providerComparison;
+  // Sandbox connections are only split out of the main list in production live
+  // mode; in sandbox/dev mode all connections are shown as before.
+  const mainListConnections = liveMode
+    ? connectionsWithDisplayStatus.filter((connection) => !isSandboxConnection(connection))
+    : connectionsWithDisplayStatus;
+  const collapsedSandboxConnections = liveMode
+    ? connectionsWithDisplayStatus.filter((connection) => isSandboxConnection(connection))
+    : [];
+  const [isCleaningUp, setIsCleaningUp] = useState(false);
+  const cleanup = sandboxCleanupPreview ?? {
+    connections: 0,
+    accounts: 0,
+    transactions: 0,
+    providerTokens: 0,
+    syncRuns: 0,
+  };
+  const hasSandboxData =
+    cleanup.connections + cleanup.accounts + cleanup.transactions + cleanup.providerTokens + cleanup.syncRuns >
+      0 || collapsedSandboxConnections.length > 0;
+
+  function cleanupSandboxData() {
+    setMessage(null);
+    setIsCleaningUp(true);
+    startTransition(() => {
+      void postJson("/api/data-cleanup/sandbox")
+        .then((payload) => {
+          setMessage(payload.message ?? "Sandbox data removed.");
+          window.location.assign("/settings/connected-accounts");
+        })
+        .catch((error: Error) => setMessage(error.message))
+        .finally(() => setIsCleaningUp(false));
+    });
+  }
 
   async function postJson(url: string, body?: Record<string, unknown>) {
     const response = await fetch(url, {
@@ -186,7 +239,7 @@ export function ConnectedAccountsManager({
 
   return (
     <div className="space-y-6">
-      {providerState.moneyhubReadiness ? (
+      {showMoneyhubReadiness && providerState.moneyhubReadiness ? (
         <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -344,7 +397,7 @@ export function ConnectedAccountsManager({
         </section>
       ) : null}
 
-      {providerState.providerComparison ? (
+      {providerComparison && providerComparison.length > 0 ? (
         <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <div>
             <h2 className="text-lg font-semibold text-ink">Provider comparison</h2>
@@ -355,7 +408,7 @@ export function ConnectedAccountsManager({
             </p>
           </div>
           <div className="mt-5 grid gap-4 xl:grid-cols-3">
-            {providerState.providerComparison.map((provider) => (
+            {providerComparison.map((provider) => (
               <article key={provider.provider} className="rounded-lg border border-line bg-paper p-4">
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="font-semibold text-ink">{provider.label}</h3>
@@ -509,7 +562,7 @@ export function ConnectedAccountsManager({
           <button
             type="button"
             onClick={syncAllConnections}
-            disabled={isPending || isSyncingAll || connectionsWithDisplayStatus.length === 0}
+            disabled={isPending || isSyncingAll || mainListConnections.length === 0}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
           >
             <RefreshCw className={isSyncingAll ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
@@ -517,13 +570,13 @@ export function ConnectedAccountsManager({
           </button>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
-          {connectionsWithDisplayStatus.length === 0 ? (
+          {mainListConnections.length === 0 ? (
             <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/60">
-              No provider connections are available yet.
+              No live provider connections are available yet.
             </div>
           ) : null}
 
-          {connectionsWithDisplayStatus.map((connection) => (
+          {mainListConnections.map((connection) => (
             <article key={connection.id} className="rounded-lg border border-line bg-paper p-4">
               {(() => {
                 const isSyncingConnection = syncingConnectionIds.includes(connection.id);
@@ -693,6 +746,74 @@ export function ConnectedAccountsManager({
           ))}
         </div>
       </section>
+
+      {collapsedSandboxConnections.length > 0 ? (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <h2 className="text-lg font-semibold text-ink">Old sandbox/test data</h2>
+          <p className="mt-1 text-sm text-ink/60">
+            {collapsedSandboxConnections.length} old sandbox/test connection
+            {collapsedSandboxConnections.length === 1 ? " is" : "s are"} hidden from your live
+            connections.
+          </p>
+          <ul className="mt-4 space-y-2">
+            {collapsedSandboxConnections.map((connection) => (
+              <li
+                key={connection.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper px-4 py-3 text-sm"
+              >
+                <span className="font-semibold text-ink">{connection.institutionName}</span>
+                <span className="rounded-full bg-ink/5 px-2 py-0.5 text-xs font-semibold text-ink/60">
+                  sandbox
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {hasSandboxData ? (
+        <section className="rounded-lg border border-berry/30 bg-berry/5 p-5">
+          <div className="flex items-center gap-2">
+            <Trash2 className="h-5 w-5 text-berry" aria-hidden="true" />
+            <h2 className="text-lg font-semibold text-ink">Clean up sandbox data</h2>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-ink/70">
+            Remove old sandbox/mock records from your account. Live TrueLayer connections,
+            tokens, accounts, and transactions are never touched.
+          </p>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
+            <div className="rounded-lg border border-line bg-white p-3">
+              <dt className="text-ink/50">Connections</dt>
+              <dd className="mt-1 font-semibold text-ink">{cleanup.connections}</dd>
+            </div>
+            <div className="rounded-lg border border-line bg-white p-3">
+              <dt className="text-ink/50">Accounts</dt>
+              <dd className="mt-1 font-semibold text-ink">{cleanup.accounts}</dd>
+            </div>
+            <div className="rounded-lg border border-line bg-white p-3">
+              <dt className="text-ink/50">Transactions</dt>
+              <dd className="mt-1 font-semibold text-ink">{cleanup.transactions}</dd>
+            </div>
+            <div className="rounded-lg border border-line bg-white p-3">
+              <dt className="text-ink/50">Token records</dt>
+              <dd className="mt-1 font-semibold text-ink">{cleanup.providerTokens}</dd>
+            </div>
+            <div className="rounded-lg border border-line bg-white p-3">
+              <dt className="text-ink/50">Sync runs</dt>
+              <dd className="mt-1 font-semibold text-ink">{cleanup.syncRuns}</dd>
+            </div>
+          </dl>
+          <button
+            type="button"
+            onClick={cleanupSandboxData}
+            disabled={isPending || isCleaningUp}
+            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-berry px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            {isCleaningUp ? "Removing" : "Remove sandbox/mock data"}
+          </button>
+        </section>
+      ) : null}
     </div>
   );
 }

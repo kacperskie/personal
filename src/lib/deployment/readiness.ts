@@ -191,14 +191,20 @@ export function buildSystemReadinessReport(
     check(
       "moneyhub",
       "Moneyhub sandbox",
-      statusFromConfigured(
-        validation.serverOnly.moneyhubSandboxConfigured,
-        !flags.moneyhubSandboxEnabled && !flags.openBankingEnabled,
-      ),
-      validation.serverOnly.moneyhubSandboxConfigured
-        ? "Sandbox configuration appears present."
-        : "Not fully configured; mock provider fallback remains available.",
-      flags.moneyhubSandboxEnabled || flags.openBankingEnabled
+      // Skipped (pass) when Moneyhub is not the selected provider — an unused
+      // optional provider must never fail or warn readiness.
+      selectedProvider !== "moneyhub"
+        ? "pass"
+        : statusFromConfigured(
+            validation.serverOnly.moneyhubSandboxConfigured,
+            !flags.moneyhubSandboxEnabled,
+          ),
+      selectedProvider !== "moneyhub"
+        ? "Not the selected Open Banking provider; Moneyhub sandbox is skipped."
+        : validation.serverOnly.moneyhubSandboxConfigured
+          ? "Sandbox configuration appears present."
+          : "Not fully configured; mock provider fallback remains available.",
+      selectedProvider === "moneyhub" && (flags.moneyhubSandboxEnabled || flags.openBankingEnabled)
         ? "Set Moneyhub sandbox client, redirect, and webhook configuration."
         : null,
     ),

@@ -59,7 +59,11 @@ function defaultPurposeForType(type: AccountType, subtype: AccountSubtype): Acco
     return "loan_account";
   }
 
-  if (type === "savings" || subtype === "pocket" || subtype === "vault") {
+  if (subtype === "pocket") {
+    return "pocket";
+  }
+
+  if (type === "savings" || subtype === "vault") {
     return "short_term_savings";
   }
 
@@ -104,6 +108,23 @@ function baseSuggestion(account: ProviderAccount): AccountPurposeSuggestion {
 export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeSuggestion {
   const text = textFor(account);
   const base = baseSuggestion(account);
+
+  // A provider "pocket" is unambiguously money set aside for spending (e.g. an
+  // Amex pocket in Revolut) — classify it before merchant-name heuristics so a
+  // pocket named after a card is not mistaken for a credit card.
+  if (account.subtype === "pocket") {
+    return {
+      ...base,
+      purpose: "pocket",
+      accountRole: "savings",
+      includeInCashflow: false,
+      includeInSafeToSpend: false,
+      isSpendingAccount: false,
+      isSavingsAccount: true,
+      reason:
+        "Pockets hold money set aside for specific spending (e.g. an Amex pocket) and are excluded from safe-to-spend.",
+    };
+  }
 
   if (text.includes("american express") || text.includes("amex")) {
     return {
@@ -159,7 +180,7 @@ export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeS
   }
 
   if (text.includes("revolut")) {
-    if (account.type === "savings" || account.subtype === "pocket" || account.subtype === "vault") {
+    if (account.type === "savings" || account.subtype === "vault") {
       return {
         ...base,
         purpose: "short_term_savings",
@@ -168,7 +189,7 @@ export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeS
         includeInSafeToSpend: false,
         isSpendingAccount: false,
         isSavingsAccount: true,
-        reason: "Revolut pocket or vault-like balances are treated as short-term savings.",
+        reason: "Revolut vault-like balances are treated as short-term savings.",
       };
     }
 

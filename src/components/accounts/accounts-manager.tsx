@@ -34,6 +34,7 @@ const purposeLabels: Record<AccountPurpose, string> = {
   everyday_spending: "Everyday spending",
   emergency_fund: "Emergency fund",
   short_term_savings: "Short-term savings",
+  pocket: "Pocket (money set aside for spending)",
   holiday_fund: "Holiday fund",
   pet_fund: "Pet fund",
   house_deposit: "House deposit",
@@ -66,12 +67,12 @@ export function AccountsManager({
   accounts,
   bills,
   savingsGoals,
-  supabaseConfigured,
+  persistenceConfigured,
 }: {
   accounts: Account[];
   bills: Bill[];
   savingsGoals: SavingsGoal[];
-  supabaseConfigured: boolean;
+  persistenceConfigured: boolean;
 }) {
   const [accountDrafts, setAccountDrafts] = useState(accounts);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -109,7 +110,7 @@ export function AccountsManager({
       })
         .then(() => {
           setMessage(
-            supabaseConfigured
+            persistenceConfigured
               ? "Account settings saved."
               : "Account settings updated in local mock state.",
           );
