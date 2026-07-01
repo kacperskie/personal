@@ -1,77 +1,69 @@
 import {
+  AlertTriangle,
   Banknote,
   CalendarClock,
   ClipboardList,
   Landmark,
   PiggyBank,
   Repeat,
+  ShieldCheck,
   TrendingDown,
   TrendingUp,
   WalletCards,
-  ShieldCheck,
 } from "lucide-react";
 import { BudgetHealthChart } from "@/components/budget-health-chart";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
-import {
-  budgetHealth,
-  dashboardSummary,
-  upcomingBills,
-} from "@/lib/mock-data";
-import { buildMoneyCoachContext } from "@/lib/ai/context-builder";
-import { buildDeterministicMoneyCoachFallback } from "@/lib/ai/money-coach";
+import { getDashboardViewModel } from "@/lib/dashboard/summary";
 import { formatCurrency } from "@/lib/format";
-import {
-  getAccounts,
-  getCashflowEvents,
-  getDetectedBills,
-  getDetectedSubscriptions,
-  getSpendingAnomalies,
-  getSubscriptions,
-  getTransactionEnrichments,
-} from "@/lib/repositories/finance-repository";
-import { forecastCashflow } from "@/lib/transaction-intelligence";
+
+function dashboardCopy(source: "firebase" | "mock" | "firebase_fallback") {
+  if (source === "mock") {
+    return {
+      eyebrow: "Mock dashboard",
+      description: "A demo view of cash, commitments, and budget health using seeded mock figures.",
+    };
+  }
+
+  if (source === "firebase_fallback") {
+    return {
+      eyebrow: "Mock fallback",
+      description:
+        "Firebase data could not be loaded, so the dashboard is showing explicit mock fallback figures.",
+    };
+  }
+
+  return {
+    eyebrow: "Live dashboard",
+    description:
+      "Your safe-to-spend view calculated from signed-in, user-owned Firebase finance records.",
+  };
+}
 
 export default async function DashboardPage() {
-  const [
-    accounts,
-    cashflowEvents,
-    detectedBills,
-    detectedSubscriptions,
-    subscriptions,
-    anomalies,
-    enrichments,
-  ] = await Promise.all([
-    getAccounts(),
-    getCashflowEvents(),
-    getDetectedBills(),
-    getDetectedSubscriptions(),
-    getSubscriptions(),
-    getSpendingAnomalies(),
-    getTransactionEnrichments(),
-  ]);
+  const dashboard = await getDashboardViewModel();
 
-  if (accounts.length === 0) {
+  if (dashboard.kind === "empty") {
     return (
       <div className="space-y-6">
         <PageHeader
           eyebrow="Empty dashboard"
           title="Dashboard"
-          description="No finance data is available yet. Add accounts or manual entries to build the staging dashboard from real persisted records."
+          description="No finance data is available for your signed-in Firebase account yet. Add accounts, bills, debts, savings goals, or manual entries to calculate a real safe-to-spend number."
         />
         <section className="rounded-lg border border-line bg-white p-6 shadow-panel">
-          <h2 className="text-lg font-semibold text-ink">No accounts yet</h2>
+          <h2 className="text-lg font-semibold text-ink">Set up your first real numbers</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/65">
-            This state appears when Supabase is configured but the signed-in user has no
-            accounts or manual setup data. Mock fallback remains available for local
-            development when it is enabled.
+            The dashboard is intentionally not showing seeded mock totals in Firebase mode. Add
+            user-owned records first, then the deterministic finance engine will calculate safe to
+            spend, bills funding, overdraft position, and debt progress from your data.
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <a
               href="/accounts"
               className="inline-flex min-h-10 items-center rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
             >
-              Review accounts
+              Add accounts
             </a>
             <a
               href="/manual-entries"
@@ -91,43 +83,54 @@ export default async function DashboardPage() {
     );
   }
 
-  const moneyCoachContext = await buildMoneyCoachContext({
-    mode: "weekly_review",
-    question: "Dashboard money coach summary",
-  });
-  const moneyCoachSummary = buildDeterministicMoneyCoachFallback(
-    moneyCoachContext,
-    "weekly_review",
-  );
-  const cashflowForecast = forecastCashflow({
-    accounts,
-    events: cashflowEvents,
-    minimumBuffer: 350,
-  });
-  const subscriptionTotalThisMonth = [
-    ...subscriptions.map((subscription) => subscription.amount),
-    ...detectedSubscriptions
-      .filter((subscription) => subscription.status !== "dismissed")
-      .map((subscription) => subscription.amountEstimate),
-  ].reduce((total, amount) => total + amount, 0);
-  const detectedItemsNeedingReview = [
-    ...detectedBills.filter((bill) => !bill.reviewed),
-    ...detectedSubscriptions.filter((subscription) => !subscription.reviewed),
-  ].length;
-  const unusualSpendingWarnings = anomalies.filter(
-    (anomaly) => anomaly.status !== "dismissed",
-  ).length;
-  const internalTransfersExcluded = enrichments.filter(
-    (enrichment) => enrichment.internalTransfer && enrichment.excludedFromSpending,
-  ).length;
+  if (dashboard.kind === "error") {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Dashboard unavailable"
+          title="Dashboard"
+          description="The app could not calculate your live dashboard from Firebase."
+        />
+        <section className="rounded-lg border border-berry/30 bg-berry/5 p-6">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-berry" aria-hidden="true" />
+            <div>
+              <h2 className="text-lg font-semibold text-ink">Finance data could not load</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/70">{dashboard.message}</p>
+              <a
+                href="/settings/system-readiness"
+                className="mt-5 inline-flex min-h-10 items-center rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+              >
+                Check readiness
+              </a>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  const { eyebrow, description } = dashboardCopy(dashboard.source);
+  const summary = dashboard.summary;
+  const financeV2 = dashboard.financeV2;
+  const subscriptionAndBillCount = dashboard.dataCounts.bills;
+  const debtTotal = financeV2.debtFreedom.totalDebt;
+  const overdraftUsed = financeV2.overdraft?.currentOverdraftUsed ?? 0;
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Mock dashboard"
-        title="Dashboard"
-        description="A calm first view of cash, commitments, and budget health using seeded demo figures only."
-      />
+      <PageHeader eyebrow={eyebrow} title="Dashboard" description={description} />
+
+      {dashboard.source === "firebase_fallback" ? (
+        <section className="rounded-lg border border-saffron/30 bg-saffron/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-saffron" aria-hidden="true" />
+            <p className="text-sm leading-6 text-ink/75">
+              {dashboard.fallbackReason} These numbers are not from your signed-in Firebase data.
+            </p>
+          </div>
+        </section>
+      ) : null}
 
       <section
         aria-label="Key finance metrics"
@@ -135,87 +138,115 @@ export default async function DashboardPage() {
       >
         <StatCard
           label="Current cash"
-          value={formatCurrency(dashboardSummary.currentCash)}
-          detail="Across mock current and savings accounts"
+          value={formatCurrency(summary.currentCash)}
+          detail="Accounts and manual cash items included in cashflow"
           icon={Banknote}
           tone="teal"
         />
         <StatCard
           label="Safe to spend"
-          value={formatCurrency(dashboardSummary.safeToSpend)}
-          detail="After bills, savings, debt, goals, and buffer"
+          value={formatCurrency(summary.safeToSpend)}
+          detail="After bills, savings, debt payments, and buffer"
           icon={PiggyBank}
-          tone="moss"
+          tone={summary.safeToSpend < 0 ? "berry" : "moss"}
         />
         <StatCard
           label="Bills due before payday"
-          value={formatCurrency(dashboardSummary.billsDueBeforePayday)}
-          detail={`Next payday: ${dashboardSummary.nextPayday}`}
+          value={formatCurrency(summary.billsDueBeforePayday)}
+          detail={`Next payday: ${summary.nextPayday}`}
           icon={CalendarClock}
           tone="saffron"
         />
         <StatCard
           label="Bills account balance"
-          value={formatCurrency(dashboardSummary.billsAccountBalance)}
-          detail="Ringfenced balance excluded from safe-to-spend"
+          value={formatCurrency(summary.billsAccountBalance)}
+          detail={
+            financeV2.billsAccount.isFullyFunded
+              ? "Bills account is funded for known commitments"
+              : `${formatCurrency(financeV2.billsAccount.expectedShortfall)} short before payday`
+          }
           icon={WalletCards}
-          tone="saffron"
+          tone={financeV2.billsAccount.isFullyFunded ? "moss" : "berry"}
         />
         <StatCard
           label="Monthly income"
-          value={formatCurrency(dashboardSummary.monthlyIncome)}
-          detail="Mock salary and regular income"
+          value={formatCurrency(summary.monthlyIncome)}
+          detail="Transactions and manual income in the active period"
           icon={TrendingUp}
           tone="teal"
         />
         <StatCard
           label="Monthly spending"
-          value={formatCurrency(dashboardSummary.monthlySpending)}
-          detail="Reviewed card and current account spending"
+          value={formatCurrency(summary.monthlySpending)}
+          detail="Reviewed spending and manual expenses in the active period"
           icon={TrendingDown}
           tone="berry"
         />
         <StatCard
           label="Projected month-end balance"
-          value={formatCurrency(dashboardSummary.projectedMonthEndBalance)}
-          detail="Forecast from known mock commitments"
+          value={formatCurrency(summary.projectedMonthEndBalance)}
+          detail="Current cash plus known income less known outflows"
           icon={Landmark}
-          tone="moss"
+          tone={summary.projectedMonthEndBalance < 0 ? "berry" : "moss"}
         />
         <StatCard
-          label="Subscription total this month"
-          value={formatCurrency(subscriptionTotalThisMonth)}
-          detail="Confirmed and detected recurring subscriptions"
+          label="Debt balance"
+          value={formatCurrency(debtTotal)}
+          detail={
+            financeV2.debtFreedom.projectedDebtFreeDate
+              ? `Projected debt-free: ${financeV2.debtFreedom.projectedDebtFreeDate}`
+              : "No debt-free date projected yet"
+          }
+          icon={TrendingDown}
+          tone={debtTotal > 0 ? "saffron" : "moss"}
+        />
+        <StatCard
+          label="Overdraft used"
+          value={formatCurrency(overdraftUsed)}
+          detail={
+            financeV2.overdraft
+              ? `Risk before payday: ${financeV2.overdraft.riskBeforePayday}`
+              : "No active overdraft plan recorded"
+          }
+          icon={ShieldCheck}
+          tone={
+            financeV2.overdraft?.riskBeforePayday === "high"
+              ? "berry"
+              : overdraftUsed > 0
+                ? "saffron"
+                : "moss"
+          }
+        />
+        <StatCard
+          label="Known bills and subscriptions"
+          value={String(subscriptionAndBillCount)}
+          detail="Persisted bill and subscription records in this dashboard"
           icon={Repeat}
           tone="teal"
         />
         <StatCard
-          label="Detected items needing review"
-          value={String(detectedItemsNeedingReview)}
-          detail="Bills and subscriptions awaiting approval"
+          label="Payday allocation"
+          value={
+            financeV2.paydayAllocation
+              ? formatCurrency(financeV2.paydayAllocation.flexibleSpendingAllocation)
+              : "Not set"
+          }
+          detail={
+            financeV2.paydayAllocation
+              ? "Flexible spending after priority payday targets"
+              : "Add a payday plan to calculate allocation"
+          }
           icon={ClipboardList}
-          tone="saffron"
-        />
-        <StatCard
-          label="Projected bills account balance"
-          value={formatCurrency(cashflowForecast.projectedBillsAccountBalance)}
-          detail="After known bills and subscriptions before payday"
-          icon={WalletCards}
-          tone={cashflowForecast.projectedBillsAccountBalance < 0 ? "berry" : "moss"}
-        />
-        <StatCard
-          label="Unusual spending warnings"
-          value={String(unusualSpendingWarnings)}
-          detail="Duplicate, missing bill, large, or price-change checks"
-          icon={TrendingDown}
-          tone={unusualSpendingWarnings > 0 ? "saffron" : "moss"}
-        />
-        <StatCard
-          label="Internal transfers excluded"
-          value={String(internalTransfersExcluded)}
-          detail="Still visible in Transactions, excluded from spend totals"
-          icon={ShieldCheck}
           tone="moss"
+        />
+        <StatCard
+          label="Net worth"
+          value={formatCurrency(summary.netWorth)}
+          detail={`${formatCurrency(summary.totalAssets)} assets less ${formatCurrency(
+            summary.totalLiabilities,
+          )} liabilities`}
+          icon={WalletCards}
+          tone={summary.netWorth < 0 ? "berry" : "moss"}
         />
       </section>
 
@@ -224,42 +255,50 @@ export default async function DashboardPage() {
           <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-ink">Budget health</h2>
-              <p className="text-sm text-ink/60">
-                Spend against the current mock monthly budget.
-              </p>
+              <p className="text-sm text-ink/60">Spend against the active budget period.</p>
             </div>
             <span className="w-fit rounded-full bg-moss/10 px-3 py-1 text-xs font-semibold text-moss">
-              {dashboardSummary.budgetStatus}
+              {summary.budgetStatus}
             </span>
           </div>
-          <BudgetHealthChart data={budgetHealth} />
+          {dashboard.budgetHealth.length > 0 ? (
+            <BudgetHealthChart data={dashboard.budgetHealth} />
+          ) : (
+            <p className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/65">
+              No active budgets are recorded yet.
+            </p>
+          )}
         </div>
 
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <div className="mb-5">
             <h2 className="text-lg font-semibold text-ink">Upcoming bills</h2>
-            <p className="text-sm text-ink/60">
-              Confirmed mock commitments before payday.
-            </p>
+            <p className="text-sm text-ink/60">Known commitments before payday.</p>
           </div>
-          <div className="space-y-3">
-            {upcomingBills.map((bill) => (
-              <div
-                key={`${bill.name}-${bill.dueDate}`}
-                className="flex items-center justify-between gap-4 rounded-lg border border-line/80 px-4 py-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-ink">{bill.name}</p>
-                  <p className="text-xs text-ink/55">
-                    {bill.dueDateLabel} - {bill.type}
+          {dashboard.upcomingBills.length > 0 ? (
+            <div className="space-y-3">
+              {dashboard.upcomingBills.map((bill) => (
+                <div
+                  key={`${bill.id}-${bill.dueDate}`}
+                  className="flex items-center justify-between gap-4 rounded-lg border border-line/80 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-ink">{bill.name}</p>
+                    <p className="text-xs text-ink/55">
+                      {bill.dueDateLabel} - {bill.type}
+                    </p>
+                  </div>
+                  <p className="shrink-0 text-sm font-semibold text-ink">
+                    {formatCurrency(bill.amount)}
                   </p>
                 </div>
-                <p className="shrink-0 text-sm font-semibold text-ink">
-                  {formatCurrency(bill.amount)}
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/65">
+              No bills or subscriptions are due before the next payday.
+            </p>
+          )}
         </div>
       </section>
 
@@ -267,32 +306,30 @@ export default async function DashboardPage() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.75fr)_minmax(280px,0.25fr)] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-teal">
-              Money coach summary
+              Deterministic next action
             </p>
             <h2 className="mt-2 text-xl font-semibold text-ink">
-              {moneyCoachSummary.answerSummary}
+              {financeV2.nextBestAction.title}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-ink/70">
-              {moneyCoachSummary.explanation.slice(0, 2).join(" ")}
+              {financeV2.nextBestAction.description}
             </p>
           </div>
           <div className="rounded-lg border border-teal/20 bg-white p-4">
-            <p className="text-sm font-semibold text-ink">Next action</p>
-            <p className="mt-2 text-sm text-ink/70">
-              {moneyCoachSummary.suggestedNextActions[0]}
-            </p>
+            <p className="text-sm font-semibold text-ink">Why this comes first</p>
+            <p className="mt-2 text-sm text-ink/70">{financeV2.nextBestAction.reason}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <a
-                href="/ai-coach"
+                href="/accounts"
                 className="inline-flex min-h-10 items-center rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white"
               >
-                Ask why
+                Review accounts
               </a>
               <a
-                href="/ai-coach"
+                href="/manual-entries"
                 className="inline-flex min-h-10 items-center rounded-lg border border-line px-3 py-2 text-sm font-semibold text-ink/70"
               >
-                View details
+                Manual entries
               </a>
             </div>
           </div>

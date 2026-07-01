@@ -142,6 +142,13 @@ export async function getFirebaseCollection<K extends FirebaseCollectionName>(
     return fallback;
   }
 
+  return getFirebaseCollectionForContext(context, collectionName);
+}
+
+export async function getFirebaseCollectionForContext<K extends FirebaseCollectionName>(
+  context: FirebaseAuthenticatedContext,
+  collectionName: K,
+): Promise<CollectionTypeMap[K][]> {
   const snapshot = await context.db.collection(collectionPath(context.userId, collectionName)).get();
 
   return snapshot.docs.map((document) => document.data() as CollectionTypeMap[K]);
