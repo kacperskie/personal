@@ -15,8 +15,117 @@ export type TransactionBudgetTreatment = {
   includeInSafeToSpendImpact: boolean;
   budgetCategory: string | null;
   exclusionReason: TransactionBudgetExclusionReason | null;
+  reviewed: boolean;
   source: "deterministic" | "user";
 };
+
+export type TransactionQuickAction =
+  | "include"
+  | "exclude_weekly"
+  | "exclude_monthly"
+  | "exclude_both"
+  | "internal_transfer"
+  | "amex_payment"
+  | "amex_pocket_transfer"
+  | "bill"
+  | "savings_transfer"
+  | "ignored";
+
+export type TransactionBudgetOverrideChanges = Partial<
+  Pick<
+    TransactionBudgetOverride,
+    | "includeInWeeklyBudget"
+    | "includeInMonthlyBudget"
+    | "includeInSpendingSummaries"
+    | "includeInSafeToSpendImpact"
+    | "includeInCreditCardBalanceEstimate"
+    | "budgetCategory"
+    | "exclusionReason"
+    | "userNote"
+    | "reviewed"
+  >
+>;
+
+/**
+ * Deterministic change-set for a row/bulk quick action. Pure and exported so the
+ * server actions and tests share one source of truth. Marking a role also marks
+ * the transaction reviewed (the user made an explicit decision).
+ */
+export function budgetOverrideChangesForAction(
+  action: TransactionQuickAction,
+): TransactionBudgetOverrideChanges {
+  const map: Record<TransactionQuickAction, TransactionBudgetOverrideChanges> = {
+    include: {
+      includeInWeeklyBudget: true,
+      includeInMonthlyBudget: true,
+      includeInSpendingSummaries: true,
+      includeInSafeToSpendImpact: true,
+      includeInCreditCardBalanceEstimate: true,
+      exclusionReason: null,
+      reviewed: true,
+    },
+    exclude_weekly: { includeInWeeklyBudget: false, reviewed: true },
+    exclude_monthly: { includeInMonthlyBudget: false, reviewed: true },
+    exclude_both: {
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: false,
+      exclusionReason: "ignored",
+      reviewed: true,
+    },
+    internal_transfer: {
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: false,
+      exclusionReason: "internal_transfer",
+      reviewed: true,
+    },
+    amex_payment: {
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: false,
+      includeInCreditCardBalanceEstimate: true,
+      exclusionReason: "credit_card_payment",
+      reviewed: true,
+    },
+    amex_pocket_transfer: {
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: false,
+      exclusionReason: "amex_pocket_transfer",
+      reviewed: true,
+    },
+    bill: {
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: true,
+      includeInSpendingSummaries: true,
+      includeInSafeToSpendImpact: true,
+      exclusionReason: "bill",
+      reviewed: true,
+    },
+    savings_transfer: {
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: false,
+      exclusionReason: "savings_transfer",
+      reviewed: true,
+    },
+    ignored: {
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: false,
+      exclusionReason: "ignored",
+      reviewed: true,
+    },
+  };
+  return map[action];
+}
 
 export type CreditCardTransactionEstimateTreatment = {
   transactionId: string;
@@ -140,6 +249,8 @@ export function getTransactionBudgetTreatment(
   account?: Account | null,
   override?: TransactionBudgetOverride | null,
 ): TransactionBudgetTreatment {
+  const transactionReviewed = transaction.status === "reviewed";
+
   if (override) {
     return {
       transactionId: transaction.id,
@@ -149,6 +260,7 @@ export function getTransactionBudgetTreatment(
       includeInSafeToSpendImpact: override.includeInSafeToSpendImpact,
       budgetCategory: override.budgetCategory ?? transaction.categoryId,
       exclusionReason: override.exclusionReason ?? null,
+      reviewed: override.reviewed ?? transactionReviewed,
       source: "user",
     };
   }
@@ -164,6 +276,7 @@ export function getTransactionBudgetTreatment(
       includeInSafeToSpendImpact: isExpense(transaction),
       budgetCategory: transaction.categoryId,
       exclusionReason: null,
+      reviewed: transactionReviewed,
       source: "deterministic",
     };
   }
@@ -179,6 +292,7 @@ export function getTransactionBudgetTreatment(
     includeInSafeToSpendImpact: ordinarySpend || bill,
     budgetCategory: transaction.categoryId,
     exclusionReason: reason,
+    reviewed: transactionReviewed,
     source: "deterministic",
   };
 }
@@ -187,19 +301,7 @@ export function createTransactionBudgetOverride(input: {
   userId: string;
   transaction: Transaction;
   account?: Account | null;
-  changes: Partial<
-    Pick<
-      TransactionBudgetOverride,
-      | "includeInWeeklyBudget"
-      | "includeInMonthlyBudget"
-      | "includeInSpendingSummaries"
-      | "includeInSafeToSpendImpact"
-      | "includeInCreditCardBalanceEstimate"
-      | "budgetCategory"
-      | "exclusionReason"
-      | "userNote"
-    >
-  >;
+  changes: TransactionBudgetOverrideChanges;
   existing?: TransactionBudgetOverride | null;
   now?: string;
 }): TransactionBudgetOverride {
@@ -229,6 +331,7 @@ export function createTransactionBudgetOverride(input: {
     budgetCategory: input.changes.budgetCategory ?? defaults.budgetCategory,
     exclusionReason: input.changes.exclusionReason ?? defaults.exclusionReason,
     userNote: input.changes.userNote ?? input.existing?.userNote ?? null,
+    reviewed: input.changes.reviewed ?? input.existing?.reviewed ?? defaults.reviewed,
     createdAt: input.existing?.createdAt ?? now,
     updatedAt: now,
   };

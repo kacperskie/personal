@@ -1,13 +1,20 @@
 import { PageHeader } from "@/components/page-header";
-import { TransactionsExplorer } from "@/components/transactions/transactions-explorer";
+import {
+  TransactionsExplorer,
+  type RowBudgetState,
+} from "@/components/transactions/transactions-explorer";
 import { StatusPill } from "@/components/status-pill";
 import {
+  applyTransactionQuickActionForm,
   bulkTransactionBudgetOverrideAction,
   excludeTransactionFromSpendingAction,
   markTransactionNotTransferAction,
+  markTransactionReviewedAction,
   markTransactionTransferAction,
   quickTransactionBudgetOverrideAction,
   recategoriseCreditCardTransactionsAction,
+  setTransactionBudgetInclusionAction,
+  setTransactionCategoryAction,
   updateTransactionBudgetOverrideAction,
   updateTransactionEnrichmentAction,
 } from "@/app/transactions/actions";
@@ -139,6 +146,27 @@ export default async function TransactionsPage() {
     visibleTransactions,
     visibleAccounts,
   ).length;
+  // Per-row budget state for inline controls (deterministic default + user override).
+  const budgetStates: Record<string, RowBudgetState> = Object.fromEntries(
+    visibleTransactions.map((transaction) => {
+      const treatment = getTransactionBudgetTreatment(
+        transaction,
+        accountById.get(transaction.accountId) ?? null,
+        overrideByTransactionId.get(transaction.id) ?? null,
+      );
+      return [
+        transaction.id,
+        {
+          weekly: treatment.includeInWeeklyBudget,
+          monthly: treatment.includeInMonthlyBudget,
+          summaries: treatment.includeInSpendingSummaries,
+          reviewed: treatment.reviewed,
+          exclusionReason: treatment.exclusionReason,
+          source: treatment.source,
+        } satisfies RowBudgetState,
+      ];
+    }),
+  );
 
   return (
     <div className="space-y-6">
@@ -172,6 +200,14 @@ export default async function TransactionsPage() {
         transactions={visibleTransactions}
         accounts={visibleAccounts}
         categories={categories}
+        budgetStates={budgetStates}
+        actions={{
+          setInclusion: setTransactionBudgetInclusionAction,
+          quick: applyTransactionQuickActionForm,
+          markReviewed: markTransactionReviewedAction,
+          setCategory: setTransactionCategoryAction,
+          bulk: bulkTransactionBudgetOverrideAction,
+        }}
         emptyMessage={
           visibleTransactions.length === 0
             ? liveMode

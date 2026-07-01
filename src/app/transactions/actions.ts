@@ -11,10 +11,52 @@ import {
   upsertTransactionEnrichment,
 } from "@/lib/repositories/finance-repository";
 import type { FinanceCategory, TransactionBudgetExclusionReason } from "@/lib/domain";
-import { createTransactionBudgetOverride } from "@/lib/finance-interpretation";
+import {
+  budgetOverrideChangesForAction,
+  createTransactionBudgetOverride,
+  type TransactionBudgetOverrideChanges,
+  type TransactionQuickAction,
+} from "@/lib/finance-interpretation";
 import { planCreditCardRecategorisation } from "@/lib/transactions/recategorise";
 import { upsertTransaction } from "@/lib/repositories/finance-repository";
 import { updateTransactionEnrichmentReview } from "@/lib/transaction-intelligence";
+
+/**
+ * Shared writer: applies a deterministic change-set to a transaction's budget
+ * override for the signed-in user. The repository scopes writes to users/{uid},
+ * so a user can never touch another user's overrides.
+ */
+async function applyBudgetOverrideChanges(
+  transactionId: string,
+  changes: TransactionBudgetOverrideChanges,
+) {
+  const [profile, transactions, accounts, overrides] = await Promise.all([
+    getUserProfile(),
+    getTransactions(),
+    getAccounts(),
+    getTransactionBudgetOverrides(),
+  ]);
+  const transaction = transactions.find((candidate) => candidate.id === transactionId);
+
+  if (!transaction) {
+    return;
+  }
+
+  const account = accounts.find((candidate) => candidate.id === transaction.accountId) ?? null;
+  const existing = overrides.find((candidate) => candidate.transactionId === transaction.id) ?? null;
+
+  await upsertTransactionBudgetOverride(
+    createTransactionBudgetOverride({
+      userId: profile.id,
+      transaction,
+      account,
+      existing,
+      changes,
+    }),
+  );
+  revalidatePath("/transactions");
+  revalidatePath("/");
+}
 
 async function findEnrichment(id: string) {
   return (await getTransactionEnrichments()).find((enrichment) => enrichment.id === id) ?? null;
@@ -144,106 +186,56 @@ export async function updateTransactionBudgetOverrideAction(formData: FormData) 
 
 export async function quickTransactionBudgetOverrideAction(
   transactionId: string,
-  action:
-    | "include"
-    | "exclude_weekly"
-    | "exclude_monthly"
-    | "exclude_both"
-    | "internal_transfer"
-    | "amex_payment"
-    | "amex_pocket_transfer"
-    | "bill"
-    | "savings_transfer"
-    | "ignored",
+  action: TransactionQuickAction,
 ) {
-  const [profile, transactions, accounts, overrides] = await Promise.all([
-    getUserProfile(),
-    getTransactions(),
-    getAccounts(),
-    getTransactionBudgetOverrides(),
-  ]);
-  const transaction = transactions.find((candidate) => candidate.id === transactionId);
+  await applyBudgetOverrideChanges(transactionId, budgetOverrideChangesForAction(action));
+}
 
-  if (!transaction) {
+/** Inline row quick action (FormData variant for use inside the table). */
+export async function applyTransactionQuickActionForm(formData: FormData) {
+  const transactionId = String(formData.get("transactionId") ?? "");
+  const action = String(formData.get("action") ?? "") as TransactionQuickAction;
+  if (!transactionId || !action) {
     return;
   }
+  await applyBudgetOverrideChanges(transactionId, budgetOverrideChangesForAction(action));
+}
 
-  const account = accounts.find((candidate) => candidate.id === transaction.accountId) ?? null;
-  const existing = overrides.find((candidate) => candidate.transactionId === transaction.id) ?? null;
-  const changesByAction = {
-    include: {
-      includeInWeeklyBudget: true,
-      includeInMonthlyBudget: true,
-      includeInSpendingSummaries: true,
-      includeInSafeToSpendImpact: true,
-      includeInCreditCardBalanceEstimate: true,
-      exclusionReason: null,
-    },
-    exclude_weekly: { includeInWeeklyBudget: false },
-    exclude_monthly: { includeInMonthlyBudget: false },
-    exclude_both: {
-      includeInWeeklyBudget: false,
-      includeInMonthlyBudget: false,
-      includeInSpendingSummaries: false,
-      includeInSafeToSpendImpact: false,
-      exclusionReason: "ignored" as const,
-    },
-    internal_transfer: {
-      includeInWeeklyBudget: false,
-      includeInMonthlyBudget: false,
-      includeInSpendingSummaries: false,
-      includeInSafeToSpendImpact: false,
-      exclusionReason: "internal_transfer" as const,
-    },
-    amex_payment: {
-      includeInWeeklyBudget: false,
-      includeInMonthlyBudget: false,
-      includeInSpendingSummaries: false,
-      includeInSafeToSpendImpact: false,
-      includeInCreditCardBalanceEstimate: true,
-      exclusionReason: "credit_card_payment" as const,
-    },
-    amex_pocket_transfer: {
-      includeInWeeklyBudget: false,
-      includeInMonthlyBudget: false,
-      includeInSpendingSummaries: false,
-      includeInSafeToSpendImpact: false,
-      exclusionReason: "amex_pocket_transfer" as const,
-    },
-    bill: {
-      includeInWeeklyBudget: false,
-      includeInMonthlyBudget: true,
-      includeInSpendingSummaries: true,
-      includeInSafeToSpendImpact: true,
-      exclusionReason: "bill" as const,
-    },
-    savings_transfer: {
-      includeInWeeklyBudget: false,
-      includeInMonthlyBudget: false,
-      includeInSpendingSummaries: false,
-      includeInSafeToSpendImpact: false,
-      exclusionReason: "savings_transfer" as const,
-    },
-    ignored: {
-      includeInWeeklyBudget: false,
-      includeInMonthlyBudget: false,
-      includeInSpendingSummaries: false,
-      includeInSafeToSpendImpact: false,
-      exclusionReason: "ignored" as const,
-    },
-  }[action];
+/** Inline toggle of a single budget-inclusion flag from the table row. */
+export async function setTransactionBudgetInclusionAction(formData: FormData) {
+  const transactionId = String(formData.get("transactionId") ?? "");
+  const field = String(formData.get("field") ?? "");
+  const value = formData.get("value") === "true";
+  const allowed: Record<string, keyof TransactionBudgetOverrideChanges> = {
+    weekly: "includeInWeeklyBudget",
+    monthly: "includeInMonthlyBudget",
+    summaries: "includeInSpendingSummaries",
+    safe_to_spend: "includeInSafeToSpendImpact",
+  };
+  const key = allowed[field];
+  if (!transactionId || !key) {
+    return;
+  }
+  await applyBudgetOverrideChanges(transactionId, { [key]: value, reviewed: true });
+}
 
-  await upsertTransactionBudgetOverride(
-    createTransactionBudgetOverride({
-      userId: profile.id,
-      transaction,
-      account,
-      existing,
-      changes: changesByAction,
-    }),
-  );
-  revalidatePath("/transactions");
-  revalidatePath("/");
+/** Inline mark-reviewed from the table row (persists on the override, not the raw txn). */
+export async function markTransactionReviewedAction(formData: FormData) {
+  const transactionId = String(formData.get("transactionId") ?? "");
+  if (!transactionId) {
+    return;
+  }
+  await applyBudgetOverrideChanges(transactionId, { reviewed: true });
+}
+
+/** Inline category change from the table row. */
+export async function setTransactionCategoryAction(formData: FormData) {
+  const transactionId = String(formData.get("transactionId") ?? "");
+  const budgetCategory = optionalString(formData.get("budgetCategory"));
+  if (!transactionId || !budgetCategory) {
+    return;
+  }
+  await applyBudgetOverrideChanges(transactionId, { budgetCategory, reviewed: true });
 }
 
 /**
@@ -266,20 +258,17 @@ export async function recategoriseCreditCardTransactionsAction() {
 
 export async function bulkTransactionBudgetOverrideAction(formData: FormData) {
   const ids = formData.getAll("transactionIds").map(String).filter(Boolean);
-  const bulkAction = String(formData.get("bulkAction") ?? "");
+  const bulkAction = String(formData.get("bulkAction") ?? "") as TransactionQuickAction;
 
   if (ids.length === 0 || bulkAction.length === 0) {
     return;
   }
 
-  await Promise.all(
-    ids.map((id) =>
-      quickTransactionBudgetOverrideAction(
-        id,
-        bulkAction as Parameters<typeof quickTransactionBudgetOverrideAction>[1],
-      ),
-    ),
-  );
+  const changes = budgetOverrideChangesForAction(bulkAction);
+  // Sequential to keep read-modify-write of the shared override set consistent.
+  for (const id of ids) {
+    await applyBudgetOverrideChanges(id, changes);
+  }
   revalidatePath("/transactions");
   revalidatePath("/");
 }

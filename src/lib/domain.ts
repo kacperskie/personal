@@ -344,6 +344,8 @@ export type TransactionBudgetOverride = {
   budgetCategory?: string | null;
   exclusionReason?: TransactionBudgetExclusionReason | null;
   userNote?: string | null;
+  /** User-confirmed review state; when set it wins over the transaction status. */
+  reviewed?: boolean | null;
   createdAt: string;
   updatedAt: string;
 };
