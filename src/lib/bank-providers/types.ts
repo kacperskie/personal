@@ -46,6 +46,12 @@ export type ProviderRequestContext = {
   providerConnectionId?: string | null;
   tokenReference?: string | null;
   providerAccountIds?: string[];
+  /**
+   * Scopes granted by the stored connection/consent, when available. Used to gate
+   * optional capabilities (e.g. cards) so we never request a scope the consent
+   * did not grant. Absent means "unknown" and does not block on its own.
+   */
+  consentScopes?: string[];
 };
 
 export interface OpenBankingProviderAdapter {

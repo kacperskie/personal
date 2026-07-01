@@ -85,7 +85,7 @@ Set these only for sandbox testing:
 - `TRUELAYER_REDIRECT_URI=https://your-site.netlify.app/api/bank-connections/callback`
 - `TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com`
 - `TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com`
-- `TRUELAYER_SCOPES=info accounts balance transactions cards offline_access`
+- `TRUELAYER_SCOPES=info accounts balance transactions offline_access`
 - `TOKEN_ENCRYPTION_KEY` with at least 32 characters
 
 This foundation is read-only. It can start consent, handle the callback, store

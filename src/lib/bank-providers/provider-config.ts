@@ -48,6 +48,8 @@ export type TrueLayerProviderConfig = {
   scopes: string[];
   configured: boolean;
   sandboxMode: boolean;
+  /** Optional capability, off by default. Cards are not part of core sync. */
+  cardsEnabled: boolean;
 };
 
 export type TrueLayerSandboxReadiness = {
@@ -154,10 +156,14 @@ export function getTrueLayerProviderConfig(
     env.TRUELAYER_API_BASE_URL || "https://api.truelayer-sandbox.com";
   const authBaseUrl =
     env.TRUELAYER_AUTH_BASE_URL || "https://auth.truelayer-sandbox.com";
-  const scopes = (env.TRUELAYER_SCOPES ?? "info accounts balance cards transactions offline_access")
+  // Cards are NOT in the default scope set — they are an optional capability
+  // enabled via TRUELAYER_CARDS_ENABLED. Core sync uses info/accounts/balance/
+  // transactions/offline_access only.
+  const scopes = (env.TRUELAYER_SCOPES ?? "info accounts balance transactions offline_access")
     .split(/[,\s]+/)
     .map((scope) => scope.trim())
     .filter(Boolean);
+  const cardsEnabled = env.TRUELAYER_CARDS_ENABLED === "true";
   const sandboxMode =
     env.TRUELAYER_SANDBOX_ENABLED === "true" ||
     apiBaseUrl.toLowerCase().includes("sandbox") ||
@@ -177,6 +183,7 @@ export function getTrueLayerProviderConfig(
     scopes,
     configured: Boolean(openBankingEnabled && clientId && clientSecret && redirectUri),
     sandboxMode,
+    cardsEnabled,
   };
 }
 

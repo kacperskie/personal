@@ -229,6 +229,14 @@ export function classifyTrueLayerFailure(
       };
     }
 
+    if (endpoint === "cards") {
+      // Cards are an optional capability; a denial here must not fail core sync.
+      return {
+        reason: "truelayer_cards_access_denied",
+        message: "TrueLayer denied card access. Cards are optional; core sync continues.",
+      };
+    }
+
     return {
       reason: "truelayer_scope_or_permission_denied",
       message: "TrueLayer denied account access. Check app Data API permissions and scopes.",
@@ -693,7 +701,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     connectionId: string,
     context?: ProviderRequestContext,
   ): Promise<ProviderAccount[]> {
-    const providerContext = requireProviderContext(context);
+    const providerContext = requireProviderContext(context) as ProviderRequestContext;
     const client = await this.getClient();
     // First sync diagnostic: confirm token validity + connection access via
     // /data/v1/me before requesting account data. A 403 here is classified as a
@@ -702,7 +710,35 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       await client.getMe(providerContext);
     }
     const rawAccounts = await client.getAccounts(providerContext);
-    const rawCards = client.getCards ? await client.getCards(providerContext) : [];
+    // Cards are an optional, off-by-default capability. Only request them when
+    // explicitly enabled AND the scope is configured AND (if the consent scopes
+    // are known) the consent granted cards. A cards failure is non-blocking.
+    const cardsAllowed =
+      this.config.cardsEnabled &&
+      this.config.scopes.includes("cards") &&
+      (!providerContext.consentScopes || providerContext.consentScopes.includes("cards")) &&
+      Boolean(client.getCards);
+    let rawCards: unknown[] = [];
+
+    if (cardsAllowed && client.getCards) {
+      try {
+        rawCards = await client.getCards(providerContext);
+      } catch (error) {
+        const reason =
+          error instanceof ProviderSafeError
+            ? error.safeReason ?? "truelayer_cards_access_denied"
+            : "truelayer_cards_access_denied";
+        // Non-blocking: cards are optional. Record a safe warning and continue
+        // core sync with accounts/balances/transactions only.
+        logServerEvent({
+          level: "warn",
+          event: "provider_sync_event",
+          message: `TrueLayer cards sync skipped (${reason}); cards are optional and non-blocking.`,
+          metadata: { endpoint: "cards", nonBlocking: true },
+        });
+        rawCards = [];
+      }
+    }
     const accountIds = [...rawAccounts, ...rawCards]
       .map((account) => (account as { account_id?: string; card_id?: string }).account_id ?? (account as { card_id?: string }).card_id)
       .filter(Boolean) as string[];

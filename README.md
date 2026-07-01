@@ -202,7 +202,7 @@ TRUELAYER_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
 TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com
 TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com
 TRUELAYER_WEBHOOK_SECRET=
-TRUELAYER_SCOPES=info accounts balance cards transactions offline_access
+TRUELAYER_SCOPES=info accounts balance transactions offline_access
 TOKEN_ENCRYPTION_KEY=
 ```
 
@@ -843,7 +843,7 @@ TRUELAYER_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback?provi
 TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com
 TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com
 TRUELAYER_WEBHOOK_SECRET=
-TRUELAYER_SCOPES=info accounts balance cards transactions offline_access
+TRUELAYER_SCOPES=info accounts balance transactions offline_access
 OPEN_BANKING_PROVIDER_PAYLOAD_DEBUG=false
 PROVIDER_PAYLOAD_DEBUG_DIR=.debug/provider-payloads
 CRON_SECRET=

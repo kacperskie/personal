@@ -48,6 +48,7 @@ const configuredTrueLayer: TrueLayerProviderConfig = {
   scopes: ["info", "accounts", "balance", "cards", "transactions", "offline_access"],
   configured: true,
   sandboxMode: true,
+  cardsEnabled: true,
 };
 
 const liveTrueLayer: TrueLayerProviderConfig = {

@@ -140,7 +140,7 @@ export function validateDeploymentEnvironment(
       env.TRUELAYER_REDIRECT_URI &&
       (env.TRUELAYER_API_BASE_URL || "https://api.truelayer-sandbox.com") &&
       (env.TRUELAYER_AUTH_BASE_URL || "https://auth.truelayer-sandbox.com") &&
-      (env.TRUELAYER_SCOPES || "info accounts balance cards transactions offline_access") &&
+      (env.TRUELAYER_SCOPES || "info accounts balance transactions offline_access") &&
       env.TOKEN_ENCRYPTION_KEY &&
       env.TOKEN_ENCRYPTION_KEY.length >= 32,
   );
