@@ -44,6 +44,33 @@ function labelStatus(status: string) {
   return status.replaceAll("_", " ");
 }
 
+function connectionMode(connection: BankConnection): "sandbox" | "live" {
+  if (connection.mode) {
+    return connection.mode;
+  }
+  return /live/i.test(connection.institutionId) ? "live" : "sandbox";
+}
+
+/**
+ * Best available safe title for a connection so multiple live connections are
+ * distinguishable (e.g. Nationwide, Revolut, American Express) instead of three
+ * identical "TrueLayer live" cards.
+ */
+function connectionTitle(connection: BankConnection): string {
+  const generic = /^truelayer (live|sandbox)$/i;
+  const candidate = connection.providerName || connection.displayName || connection.institutionName;
+  if (candidate && !generic.test(candidate)) {
+    return candidate;
+  }
+  const created = connection.consentCompletedAt ?? connection.createdAt;
+  const date = created ? formatDateShort(created.slice(0, 10)) : "unknown date";
+  return `TrueLayer ${connectionMode(connection)} connection created ${date}`;
+}
+
+const cardAccessReasons = new Set([
+  "truelayer_accounts_endpoint_not_supported",
+]);
+
 export function isDeadPreConsentConnection(connection: BankConnection) {
   const disconnectedOrRevoked =
     connection.status === "disconnected" || connection.consentStatus === "revoked";
@@ -377,7 +404,20 @@ export function ConnectedAccountsManager({
                   : "Unavailable"}
               </dd>
             </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Card providers (e.g. Amex)</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.cardSupport === "enabled"
+                  ? "Enabled"
+                  : providerState.truelayerReadiness.cardSupport === "enabled_scope_missing"
+                    ? "Scope missing"
+                    : "Disabled"}
+              </dd>
+            </div>
           </dl>
+          <p className="mt-3 text-xs text-ink/55">
+            {providerState.truelayerReadiness.cardSupportMessage}
+          </p>
           <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
             <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/70">
               <p className="font-semibold text-ink">Expected redirect URI</p>
@@ -592,21 +632,25 @@ export function ConnectedAccountsManager({
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-ink">{connection.institutionName}</h3>
+                    <h3 className="font-semibold text-ink">{connectionTitle(connection)}</h3>
                     {connection.provider === "truelayer" ? (
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                          /live/i.test(connection.institutionId)
+                          connectionMode(connection) === "live"
                             ? "bg-berry/10 text-berry"
                             : "bg-ink/5 text-ink/60"
                         }`}
                       >
-                        {/live/i.test(connection.institutionId) ? "live" : "sandbox"}
+                        {connectionMode(connection)}
                       </span>
                     ) : null}
                   </div>
                   <p className="mt-1 text-sm text-ink/60">
-                    Provider: {connection.provider} - Institution ID: {connection.institutionId}
+                    Provider: {connection.providerName ?? connection.provider} - Institution ID:{" "}
+                    {connection.institutionId}
+                    {typeof connection.accountsSyncedCount === "number"
+                      ? ` - ${connection.accountsSyncedCount} account${connection.accountsSyncedCount === 1 ? "" : "s"} synced`
+                      : ""}
                   </p>
                 </div>
                 <StatusPill
@@ -694,19 +738,47 @@ export function ConnectedAccountsManager({
               {connection.status === "sync_failed" && connection.errorMessage ? (
                 (() => {
                   const tokenHealthy = connection.tokenDiagnostics?.syncEligible === "yes";
+                  const cardOnly = connection.lastFailureReason
+                    ? cardAccessReasons.has(connection.lastFailureReason)
+                    : false;
                   return (
                     <div
                       className={`mt-4 rounded-lg border p-3 text-sm text-ink/80 ${
-                        tokenHealthy
-                          ? "border-berry/30 bg-berry/10"
-                          : "border-saffron/30 bg-saffron/10"
+                        cardOnly
+                          ? "border-teal/30 bg-teal/10"
+                          : tokenHealthy
+                            ? "border-berry/30 bg-berry/10"
+                            : "border-saffron/30 bg-saffron/10"
                       }`}
                     >
                       <p className="font-semibold text-ink">
-                        {tokenHealthy ? "Provider access denied" : "Connection needs attention"}
+                        {cardOnly
+                          ? "This provider may be card-only"
+                          : tokenHealthy
+                            ? "Provider access denied"
+                            : "Connection needs attention"}
                       </p>
                       <p className="mt-1">{connection.errorMessage}</p>
-                      {tokenHealthy ? (
+                      {connection.lastFailedEndpoint || connection.lastFailureReason ? (
+                        <p className="mt-1 text-xs text-ink/55">
+                          {connection.lastFailedEndpoint
+                            ? `Failing endpoint: ${connection.lastFailedEndpoint}. `
+                            : ""}
+                          {connection.lastFailedStatus
+                            ? `HTTP status: ${connection.lastFailedStatus}. `
+                            : ""}
+                          {connection.lastFailureReason
+                            ? `Reason: ${connection.lastFailureReason}.`
+                            : ""}
+                        </p>
+                      ) : null}
+                      {cardOnly ? (
+                        <p className="mt-2 font-semibold text-teal">
+                          Reconnect with card access: set TRUELAYER_CARDS_ENABLED=true, add
+                          &quot;cards&quot; to TRUELAYER_SCOPES, then reconnect this Amex/card
+                          connection.
+                        </p>
+                      ) : tokenHealthy ? (
                         <p className="mt-1 text-ink/60">
                           Token diagnostics look healthy, so this is a provider
                           access/permission response, not a token problem.

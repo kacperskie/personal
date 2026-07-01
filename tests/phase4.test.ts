@@ -70,6 +70,10 @@ describe("phase 4 persistence foundation", () => {
       includeInCashflow: true,
       includeInNetWorth: true,
       linkedGoalIds: ["goal_1"],
+      reservedFor: null,
+      linkedLiabilityAccountId: null,
+      overdraftLimit: null,
+      overdraftRepaymentTarget: null,
     });
   });
 

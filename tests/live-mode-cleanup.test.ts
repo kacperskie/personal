@@ -245,4 +245,59 @@ describe("Connected Accounts live-mode UI hides Moneyhub/mock provider", () => {
     // No secret values are rendered.
     expect(html).not.toContain("live-secret-value");
   });
+
+  it("labels live connections by provider metadata and shows safe failure details", () => {
+    const html = renderToStaticMarkup(
+      createElement(ConnectedAccountsManager, {
+        connections: [
+          connection({
+            id: "conn_amex",
+            mode: "live",
+            providerName: "American Express",
+            displayName: "American Express",
+            status: "sync_failed",
+            consentStatus: "active",
+            errorMessage:
+              "This provider may be card-only (its accounts endpoint is unsupported). Enable card data and reconnect if this is your Amex connection.",
+            lastFailedEndpoint: "accounts",
+            lastFailedStatus: 501,
+            lastFailureReason: "truelayer_accounts_endpoint_not_supported",
+            accountsSyncedCount: 0,
+          }),
+        ],
+        tokenDiagnostics: {
+          conn_amex: {
+            connectionId: "conn_amex",
+            tokenRecordPresent: true,
+            tokenDecryptable: "yes",
+            tokenLinkedToConnection: "yes",
+            syncEligible: "yes",
+            reasonCode: null,
+          },
+        },
+        providerState: {
+          provider: "truelayer",
+          configured: true,
+          safeMessage: "",
+          truelayerReadiness: getTrueLayerSandboxReadiness({
+            OPEN_BANKING_ENABLED: "true",
+            OPEN_BANKING_PROVIDER: "truelayer",
+            TRUELAYER_SANDBOX_ENABLED: "false",
+            TRUELAYER_CLIENT_ID: "live-client-id",
+            TRUELAYER_CLIENT_SECRET: "live-secret-value",
+            TRUELAYER_REDIRECT_URI: "https://app.example.com/api/bank-connections/callback",
+            TOKEN_ENCRYPTION_KEY: "x".repeat(32),
+          } as unknown as NodeJS.ProcessEnv),
+          moneyhubReadiness: getMoneyhubSandboxReadiness(),
+        },
+      }),
+    );
+
+    expect(html).toContain("American Express");
+    expect(html).toContain("Failing endpoint: accounts");
+    expect(html).toContain("HTTP status: 501");
+    expect(html).toContain("truelayer_accounts_endpoint_not_supported");
+    expect(html).toContain("Reconnect with card access");
+    expect(html).not.toContain("live-secret-value");
+  });
 });

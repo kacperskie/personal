@@ -78,6 +78,8 @@ export type TrueLayerSandboxReadiness = {
   redirectUriConfigured: boolean;
   /** True when live mode is on but the client ID still looks like a sandbox id. */
   sandboxClientIdInLiveMode: boolean;
+  cardSupport: "disabled" | "enabled_scope_missing" | "enabled";
+  cardSupportMessage: string;
   safeMessage: string;
 };
 
@@ -171,7 +173,7 @@ export function getTrueLayerProviderConfig(
   const authBaseUrl =
     env.TRUELAYER_AUTH_BASE_URL ||
     (sandboxMode ? "https://auth.truelayer-sandbox.com" : "https://auth.truelayer.com");
-  // Cards are NOT in the default scope set — they are an optional capability
+  // Cards are NOT in the default scope set - they are an optional capability
   // enabled via TRUELAYER_CARDS_ENABLED. Core sync uses info/accounts/balance/
   // transactions/offline_access only.
   const scopes = (env.TRUELAYER_SCOPES ?? "info accounts balance transactions offline_access")
@@ -320,7 +322,7 @@ export function getTrueLayerSandboxReadiness(
     .filter((item) => openBankingActive && !item.present)
     .map((item) => item.name);
   // The client can initialise in EITHER environment (sandbox or live) once
-  // configured — mode no longer gates this, so live mode is a first-class path.
+  // configured - mode no longer gates this, so live mode is a first-class path.
   const providerClientCanBeInitialised =
     providerSelected &&
     config.configured &&
@@ -328,6 +330,18 @@ export function getTrueLayerSandboxReadiness(
     tokenEncryptionConfigured;
   const sandboxClientIdInLiveMode =
     config.mode === "live" && Boolean(config.clientId?.startsWith("sandbox-"));
+  const cardsScopePresent = config.scopes.includes("cards");
+  const cardSupport: TrueLayerSandboxReadiness["cardSupport"] = !config.cardsEnabled
+    ? "disabled"
+    : cardsScopePresent
+      ? "enabled"
+      : "enabled_scope_missing";
+  const cardSupportMessage =
+    cardSupport === "disabled"
+      ? "Cards are disabled. Amex/card-only providers will not sync. Set TRUELAYER_CARDS_ENABLED=true and reconnect to add them."
+      : cardSupport === "enabled_scope_missing"
+        ? "Cards are enabled but the cards scope is missing. Add cards to TRUELAYER_SCOPES and reconnect."
+        : "Cards are enabled and the cards scope is present. Card-only providers (e.g. Amex) can be attempted.";
 
   return {
     providerSelected,
@@ -346,6 +360,8 @@ export function getTrueLayerSandboxReadiness(
     clientSecretConfigured: Boolean(config.clientSecret),
     redirectUriConfigured: Boolean(config.redirectUri),
     sandboxClientIdInLiveMode,
+    cardSupport,
+    cardSupportMessage,
     supabaseConfigured: isSupabaseConfigured(),
     providerClientCanBeInitialised,
     safeMessage: sandboxClientIdInLiveMode
@@ -447,8 +463,8 @@ export function getProviderConfiguredState(
       provider: selectedProvider,
       configured: config.configured,
       safeMessage: config.configured
-        ? "TrueLayer sandbox configuration is present."
-        : "TrueLayer sandbox credentials are not configured.",
+        ? `TrueLayer ${config.mode} configuration is present.`
+        : `TrueLayer ${config.mode} credentials are not configured.`,
       moneyhubReadiness: getMoneyhubSandboxReadiness(env),
       truelayerReadiness: getTrueLayerSandboxReadiness(env),
       providerComparison: getProviderComparisonCapabilities(env),

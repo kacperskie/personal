@@ -113,6 +113,7 @@ export async function syncBankConnection({
         providerUserId: providerContext?.providerUserId,
         providerConnectionId: providerContext?.providerConnectionId,
         tokenReference: providerContext?.tokenReference,
+        providerAccountType: providerAccount.type,
       });
 
       for (const providerTransaction of providerTransactions) {
@@ -130,12 +131,23 @@ export async function syncBankConnection({
     }
 
     const completedAt = new Date().toISOString();
+    // Derive a safe provider display name from the synced accounts (e.g. Nationwide,
+    // Revolut, American Express) so multiple live connections are distinguishable.
+    const derivedProviderName = providerAccounts
+      .map((account) => account.institutionName ?? null)
+      .find((name): name is string => Boolean(name && !/^truelayer (live|sandbox)$/i.test(name)));
     const updatedConnection: BankConnection = {
       ...connection,
       status: "connected",
       lastSyncedAt: completedAt,
       errorMessage: null,
       updatedAt: completedAt,
+      providerName: derivedProviderName ?? connection.providerName ?? null,
+      displayName: derivedProviderName ?? connection.displayName ?? null,
+      accountsSyncedCount: accountsUpserted,
+      cardsSyncedCount: providerAccounts.filter((account) => account.type === "credit_card").length,
+      lastFailedEndpoint: null,
+      lastFailureReason: null,
     };
     const completedEvent = syncEvent(
       updatedConnection,
@@ -168,11 +180,22 @@ export async function syncBankConnection({
   } catch (error) {
     const safeError = toProviderSafeError(error, "provider_sync_failed");
     const failedAt = new Date().toISOString();
+    const safeReason = safeError.safeReason ?? safeError.code;
+    // Derive the failing endpoint from the safe reason (never from any payload):
+    // e.g. truelayer_accounts_endpoint_not_supported -> accounts.
+    const endpointMatch = /^truelayer_(me|accounts|cards|balance|transactions)_/.exec(safeReason ?? "");
+    const lastFailedEndpoint =
+      endpointMatch?.[1] ??
+      (safeReason === "truelayer_accounts_endpoint_not_supported" ? "accounts" : null);
     const failedConnection: BankConnection = {
       ...connection,
       status: "sync_failed",
       errorMessage: safeError.userMessage,
       updatedAt: failedAt,
+      lastFailedSyncAt: failedAt,
+      lastFailedEndpoint,
+      lastFailedStatus: safeError.status,
+      lastFailureReason: safeReason ?? null,
     };
     const failedEvent = syncEvent(
       failedConnection,

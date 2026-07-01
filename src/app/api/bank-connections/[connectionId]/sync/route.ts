@@ -171,6 +171,7 @@ export async function POST(
       providerUserId: tokenRecord?.providerUserId,
       providerConnectionId: tokenRecord?.providerConnectionId,
       tokenReference: tokenRecord?.tokenReference,
+      consentScopes: tokenRecord?.scopes,
     },
     dependencies: {
       upsertAccount,

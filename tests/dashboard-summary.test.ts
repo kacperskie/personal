@@ -235,6 +235,115 @@ describe("dashboard summary", () => {
     expect(model.financeV2.nextBestAction.type).toBe("fund_bills_account");
   });
 
+  it("interprets real account purposes without inflating safe-to-spend", () => {
+    const userId = "user_real_accounts";
+    const data = emptyData(userId);
+    data.profile = { ...data.profile, minimumBuffer: 0 };
+    data.accounts = [
+      {
+        ...mockAccounts[1],
+        id: "acct_revolut_spend",
+        userId,
+        institutionName: "Revolut",
+        name: "Revolut spending",
+        balance: 500,
+        availableBalance: 500,
+        purpose: "everyday_spending",
+        includeInSafeToSpend: true,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        isSpendingAccount: true,
+        isBillsAccount: false,
+        isSavingsAccount: false,
+        status: "active",
+      },
+      {
+        ...mockAccounts[1],
+        id: "acct_nationwide_bills",
+        userId,
+        institutionName: "Nationwide",
+        name: "Bills account",
+        balance: 1000,
+        availableBalance: 1000,
+        purpose: "bills_account",
+        includeInSafeToSpend: false,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        isSpendingAccount: false,
+        isBillsAccount: true,
+        isSavingsAccount: false,
+        status: "active",
+      },
+      {
+        ...mockAccounts[1],
+        id: "acct_nationwide_overdraft",
+        userId,
+        institutionName: "Nationwide",
+        name: "Graduate overdraft",
+        balance: -200,
+        availableBalance: 1800,
+        purpose: "overdraft_account",
+        includeInSafeToSpend: false,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        overdraftLimit: 2000,
+        overdraftRepaymentTarget: 100,
+        status: "active",
+      },
+      {
+        ...mockAccounts[1],
+        id: "acct_revolut_amex_pocket",
+        userId,
+        institutionName: "Revolut",
+        name: "Amex pocket",
+        type: "savings",
+        subtype: "pocket",
+        balance: 250,
+        availableBalance: 250,
+        purpose: "pocket",
+        includeInSafeToSpend: false,
+        includeInCashflow: false,
+        includeInNetWorth: true,
+        reservedFor: "amex",
+        status: "active",
+      },
+      {
+        ...mockAccounts[1],
+        id: "acct_amex",
+        userId,
+        institutionName: "American Express",
+        name: "Amex Card",
+        type: "credit_card",
+        subtype: "credit_card",
+        balance: -300,
+        availableBalance: 1700,
+        creditLimit: 2000,
+        purpose: "credit_card",
+        includeInSafeToSpend: false,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        status: "active",
+      },
+    ];
+
+    const model = buildFirebaseDashboardModel(data, "2026-07-01");
+
+    expect(model.kind).toBe("ready");
+    if (model.kind !== "ready") return;
+    expect(model.summary.safeToSpendEligibleCash).toBe(500);
+    expect(model.summary.safeToSpend).toBe(500);
+    expect(model.summary.currentCash).toBe(1500);
+    expect(model.financeV2.overdraft?.currentOverdraftUsed).toBe(200);
+    expect(model.financeV2.debtFreedom.totalDebt).toBe(500);
+    expect(model.financeV2.creditCardFunding[0]).toMatchObject({
+      liabilityAccountId: "acct_amex",
+      balance: 300,
+      reservedBalance: 250,
+      fundedBalance: 250,
+      unfundedBalance: 50,
+    });
+  });
+
   it("does not silently show mock values in Firebase mode", () => {
     const empty = buildFirebaseDashboardModel(emptyData(), "2026-07-01");
     const live = buildFirebaseDashboardModel(liveData(), "2026-07-01");

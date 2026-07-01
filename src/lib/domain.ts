@@ -59,20 +59,23 @@ export type AccountSubtype =
 
 export type AccountPurpose =
   | "main_current_account"
-  | "bills_account"
   | "everyday_spending"
+  | "bills_account"
+  | "overdraft_account"
+  | "credit_card"
+  | "pocket"
+  | "savings"
   | "emergency_fund"
   | "short_term_savings"
-  | "pocket"
   | "holiday_fund"
   | "pet_fund"
   | "house_deposit"
-  | "credit_card"
   | "loan_account"
   | "pension"
   | "investment"
   | "cash"
   | "offline_account"
+  | "ignore"
   | "other";
 
 export type AccountRole =
@@ -130,6 +133,14 @@ export type Account = {
   isSpendingAccount: boolean;
   isBillsAccount: boolean;
   isSavingsAccount: boolean;
+  /** Optional reserved purpose for pockets/pots, e.g. "amex". */
+  reservedFor?: string | null;
+  /** Optional linked liability account, e.g. an Amex pocket linked to Amex card. */
+  linkedLiabilityAccountId?: string | null;
+  /** Arranged overdraft limit, stored for interpretation only and never counted as cash. */
+  overdraftLimit?: number | null;
+  /** Target repayment/reduction for overdraft planning. */
+  overdraftRepaymentTarget?: number | null;
   linkedGoalIds: string[];
   syncStatus: ConnectionLifecycleStatus;
   lastSyncedAt: string | null;
@@ -157,6 +168,19 @@ export type BankConnection = {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+  // Safe, non-secret provider/institution identification metadata. Populated at
+  // callback/sync time so multiple live connections are distinguishable. Never
+  // holds tokens, secrets, or raw payloads.
+  mode?: "sandbox" | "live";
+  providerName?: string | null;
+  providerId?: string | null;
+  displayName?: string | null;
+  lastFailedSyncAt?: string | null;
+  lastFailedEndpoint?: string | null;
+  lastFailedStatus?: number | null;
+  lastFailureReason?: string | null;
+  accountsSyncedCount?: number | null;
+  cardsSyncedCount?: number | null;
 };
 
 export type ProviderTokenStorageRecord = {
@@ -931,7 +955,7 @@ export type OrderedDebt = {
   apr: number | null;
   priority: number | null;
   payoffOrder: number;
-  source: "debt" | "manual";
+  source: "debt" | "manual" | "account";
 };
 
 export type DebtFreedomSummary = {

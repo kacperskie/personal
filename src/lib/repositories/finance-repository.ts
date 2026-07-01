@@ -271,6 +271,10 @@ export async function updateAccountAssignment(
         includeInCashflow: updatePayload.includeInCashflow,
         includeInNetWorth: updatePayload.includeInNetWorth,
         linkedGoalIds: updatePayload.linkedGoalIds,
+        reservedFor: updatePayload.reservedFor,
+        linkedLiabilityAccountId: updatePayload.linkedLiabilityAccountId,
+        overdraftLimit: updatePayload.overdraftLimit,
+        overdraftRepaymentTarget: updatePayload.overdraftRepaymentTarget,
         updatedAt: new Date().toISOString(),
       });
     }

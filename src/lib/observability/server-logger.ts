@@ -13,8 +13,16 @@ export type ServerLogLevel = "info" | "warn" | "error";
 const sensitiveKeyPattern =
   /(token|secret|password|credential|authorization|access|refresh|private|account_number|accountnumber|raw_payload|payload|openai|service_role|vapid|p256dh|auth)/i;
 
+function isSafeReasonCode(value: string) {
+  return /^(provider|truelayer|token|connection|sync)_[a-z_]+$/.test(value);
+}
+
 function redactValue(value: unknown): unknown {
   if (typeof value === "string") {
+    if (isSafeReasonCode(value)) {
+      return value;
+    }
+
     return value.replace(/\b\d{6,}\b/g, "[redacted-number]").replace(/[A-Za-z0-9_-]{24,}/g, "[redacted-id]");
   }
 

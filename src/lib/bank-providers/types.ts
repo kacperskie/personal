@@ -36,6 +36,7 @@ export type TransactionQuery = {
   dateFrom?: string;
   dateTo?: string;
   providerAccountId?: string;
+  providerAccountType?: ProviderAccount["type"];
   providerUserId?: string | null;
   providerConnectionId?: string | null;
   tokenReference?: string | null;

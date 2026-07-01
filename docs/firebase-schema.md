@@ -86,12 +86,25 @@ Set these only for sandbox testing:
 - `TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com`
 - `TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com`
 - `TRUELAYER_SCOPES=info accounts balance transactions offline_access`
+- `TRUELAYER_CARDS_ENABLED=false`
 - `TOKEN_ENCRYPTION_KEY` with at least 32 characters
 
 This foundation is read-only. It can start consent, handle the callback, store
 encrypted tokens server-side, sync accounts, balances, and transactions, then
 drive dashboard calculations from those records. Payments, bank transfers, AI
 coach behaviour, and webhook-driven sync remain disabled/delayed.
+
+Card providers such as American Express are disabled by default. To attempt
+card-only providers, set `TRUELAYER_CARDS_ENABLED=true`, add `cards` to
+`TRUELAYER_SCOPES`, then reconnect so the stored consent includes card access.
+
+Accounts can carry purpose metadata used by safe-to-spend and dashboard
+interpretation: `everyday_spending`, `bills_account`, `overdraft_account`,
+`credit_card`, `pocket`, `savings`, and `ignore`, plus legacy/specific purposes.
+Reserved pockets may set `reservedFor` (for example `amex`) or
+`linkedLiabilityAccountId`; overdraft accounts may set `overdraftLimit` and
+`overdraftRepaymentTarget`. Overdraft limits and card available credit are never
+counted as cash.
 
 ## Spreadsheet Tracker Onboarding
 

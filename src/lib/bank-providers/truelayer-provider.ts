@@ -41,6 +41,13 @@ export type TrueLayerBalancePayload = {
   credit_limit?: number;
 };
 
+type TrueLayerFetchOptions = {
+  endpoint: TrueLayerEndpoint;
+  scopes: string[];
+  mode: "sandbox" | "live";
+  pathTemplate?: string;
+};
+
 export type TrueLayerClientLike = {
   exchangeCodeForTokens(input: {
     code: string;
@@ -48,7 +55,7 @@ export type TrueLayerClientLike = {
   }): Promise<unknown>;
   refreshConnection(input: ProviderRequestContext): Promise<void>;
   /**
-   * GET /data/v1/me — first sync diagnostic request. Confirms the token is valid
+   * GET /data/v1/me - first sync diagnostic request. Confirms the token is valid
    * and (per TrueLayer) reveals safe identity/consent metadata. Optional so mock
    * clients in tests need not implement it.
    */
@@ -144,7 +151,7 @@ function requireProviderContext(context?: ProviderRequestContext | TransactionQu
   if (!context?.tokenReference) {
     throw new ProviderSafeError(
       "provider_sync_failed",
-      "TrueLayer token metadata is missing. Reconnect the sandbox account before syncing.",
+      "TrueLayer token metadata is missing. Reconnect the account before syncing.",
       400,
     );
   }
@@ -230,13 +237,29 @@ function extractSafeTrueLayerError(body: string): {
 export function classifyTrueLayerFailure(
   endpoint: TrueLayerEndpoint,
   status: number,
+  mode: "sandbox" | "live" = "sandbox",
+  errorCode: string | null = null,
 ): { reason: string; message: string } {
+  const env = mode === "live" ? "live" : "sandbox";
+
+  // 501 / endpoint_not_supported on /accounts is a card-only-provider signal, not
+  // a permission problem - never mark the token bad for this.
+  if (
+    endpoint === "accounts" &&
+    (status === 501 || status === 404 || errorCode === "endpoint_not_supported")
+  ) {
+    return {
+      reason: "truelayer_accounts_endpoint_not_supported",
+      message:
+        "This provider may be card-only (its accounts endpoint is unsupported). Enable card data and reconnect if this is your Amex connection.",
+    };
+  }
+
   if (status === 403) {
     if (endpoint === "me") {
       return {
         reason: "truelayer_connection_access_denied",
-        message:
-          "TrueLayer denied connection access. Reconnect the sandbox account and confirm the app has Data API access.",
+        message: `TrueLayer denied connection access. Reconnect the ${env} account and confirm the app has Data API access.`,
       };
     }
 
@@ -257,36 +280,40 @@ export function classifyTrueLayerFailure(
   if (status === 401) {
     return {
       reason: "truelayer_token_rejected",
-      message: "TrueLayer rejected the access token. Reconnect the sandbox account.",
+      message: `TrueLayer rejected the access token. Reconnect the ${env} account.`,
     };
   }
 
   return {
     reason: `truelayer_${endpoint}_fetch_failed`,
-    message: `TrueLayer sandbox ${endpoint} request failed (status ${status}).`,
+    message: `TrueLayer ${env} ${endpoint} request failed (status ${status}).`,
   };
 }
 
 async function fetchTrueLayer(
   request: Request,
-  options: { endpoint: TrueLayerEndpoint; scopes: string[] },
+  options: TrueLayerFetchOptions,
 ) {
   const response = await fetch(request);
-  const pathTemplate = pathTemplateByEndpoint[options.endpoint];
+  const pathTemplate = options.pathTemplate ?? pathTemplateByEndpoint[options.endpoint];
 
   if (!response.ok) {
     // Read the body only to extract safe error identifiers; never log the body.
     const body = await response.text().catch(() => "");
     const safe = extractSafeTrueLayerError(body);
-    const { reason, message } = classifyTrueLayerFailure(options.endpoint, response.status);
+    const { reason, message } = classifyTrueLayerFailure(
+      options.endpoint,
+      response.status,
+      options.mode,
+      safe.code,
+    );
 
     logServerEvent({
       level: "warn",
       event: "provider_sync_event",
       message: "TrueLayer fetch failed.",
       metadata: {
-        // Short, redaction-safe fields (the previous long `reason` string tripped
-        // the logger's [A-Za-z0-9_-]{24,} redactor and rendered as [redacted-id]).
+        reason,
         endpoint: options.endpoint,
         status: response.status,
         host: new URL(request.url).hostname,
@@ -349,7 +376,7 @@ async function defaultTrueLayerClientFactory(
         new Request(`${config.apiBaseUrl}/data/v1/me`, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
-        { endpoint: "me", scopes: config.scopes },
+        { endpoint: "me", scopes: config.scopes, mode: config.mode },
       );
     },
     async getAccounts(input) {
@@ -358,7 +385,7 @@ async function defaultTrueLayerClientFactory(
         new Request(`${config.apiBaseUrl}/data/v1/accounts`, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
-        { endpoint: "accounts", scopes: config.scopes },
+        { endpoint: "accounts", scopes: config.scopes, mode: config.mode },
       );
     },
     async getCards(input) {
@@ -367,7 +394,7 @@ async function defaultTrueLayerClientFactory(
         new Request(`${config.apiBaseUrl}/data/v1/cards`, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
-        { endpoint: "cards", scopes: config.scopes },
+        { endpoint: "cards", scopes: config.scopes, mode: config.mode },
       );
     },
     async getBalances(input) {
@@ -379,7 +406,7 @@ async function defaultTrueLayerClientFactory(
             new Request(`${config.apiBaseUrl}/data/v1/accounts/${accountId}/balance`, {
               headers: { authorization: `Bearer ${context.tokenReference}` },
             }),
-            { endpoint: "balance", scopes: config.scopes },
+            { endpoint: "balance", scopes: config.scopes, mode: config.mode },
           );
 
           return rows.map((row) => ({
@@ -399,7 +426,10 @@ async function defaultTrueLayerClientFactory(
         return [];
       }
 
-      const url = new URL(`${config.apiBaseUrl}/data/v1/accounts/${accountId}/transactions`);
+      const isCard = input.providerAccountType === "credit_card";
+      const url = new URL(
+        `${config.apiBaseUrl}/data/v1/${isCard ? "cards" : "accounts"}/${accountId}/transactions`,
+      );
 
       if (input.dateFrom) {
         url.searchParams.set("from", input.dateFrom);
@@ -413,7 +443,14 @@ async function defaultTrueLayerClientFactory(
         new Request(url, {
           headers: { authorization: `Bearer ${context.tokenReference}` },
         }),
-        { endpoint: "transactions", scopes: config.scopes },
+        {
+          endpoint: "transactions",
+          scopes: config.scopes,
+          mode: config.mode,
+          pathTemplate: isCard
+            ? "/data/v1/cards/{card_id}/transactions"
+            : "/data/v1/accounts/{account_id}/transactions",
+        },
       );
     },
     async revokeConnection() {
@@ -442,6 +479,14 @@ export function truelayerAccountPayload(
     display_name?: string;
     provider?: { display_name?: string; provider_id?: string };
     currency?: string;
+    current_balance?: number;
+    available_balance?: number;
+    credit_limit?: number;
+    balance?: {
+      current?: number;
+      available?: number;
+      credit_limit?: number;
+    };
   };
   const providerAccountId = payload.account_id ?? payload.card_id;
   const balance = balanceForAccount(providerAccountId, balances);
@@ -458,9 +503,9 @@ export function truelayerAccountPayload(
     officialName: payload.display_name,
     type: isCard ? "credit_card" : payload.account_type,
     accountType: isCard ? "credit_card" : payload.account_type,
-    balance: balance?.current ?? 0,
-    availableBalance: balance?.available,
-    creditLimit: balance?.credit_limit ?? null,
+    balance: balance?.current ?? payload.current_balance ?? payload.balance?.current ?? 0,
+    availableBalance: balance?.available ?? payload.available_balance ?? payload.balance?.available,
+    creditLimit: balance?.credit_limit ?? payload.credit_limit ?? payload.balance?.credit_limit ?? null,
     currency: payload.currency ?? balance?.currency,
     mask: payload.account_number?.number?.slice(-4) ?? null,
   };
@@ -471,6 +516,7 @@ export function truelayerTransactionPayload(transaction: unknown): ProviderTrans
     transaction_id?: string;
     normalised_provider_transaction_id?: string;
     account_id?: string;
+    card_id?: string;
     timestamp?: string;
     booking_datetime?: string;
     description?: string;
@@ -499,7 +545,7 @@ export function truelayerTransactionPayload(transaction: unknown): ProviderTrans
   return {
     id: payload.transaction_id ?? payload.normalised_provider_transaction_id,
     transactionId: payload.transaction_id ?? payload.normalised_provider_transaction_id,
-    accountId: payload.account_id,
+    accountId: payload.account_id ?? payload.card_id,
     date: payload.timestamp ?? payload.booking_datetime,
     description: payload.description ?? "TrueLayer transaction",
     merchant: payload.merchant_name ?? payload.description,
@@ -532,7 +578,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     if (!this.config.configured) {
       throw new ProviderSafeError(
         "provider_not_configured",
-        "TrueLayer sandbox credentials are not configured.",
+        `TrueLayer ${this.config.mode} credentials are not configured.`,
         400,
       );
     }
@@ -555,8 +601,8 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     const now = nowIso();
     const connectionId = safeConnectionId();
     const redirectUri = input.redirectUri ?? this.config.redirectUri;
-    // The environment (sandbox/live) is authoritative from server config — not
-    // the client-supplied label — so live connections are recorded as live.
+    // The environment (sandbox/live) is authoritative from server config - not
+    // the client-supplied label - so live connections are recorded as live.
     const environment = trueLayerEnvironmentLabels(this.config.mode);
     const connection: BankConnection = {
       id: connectionId,
@@ -565,6 +611,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       providerUserId: input.userId ?? null,
       institutionName: environment.institutionName,
       institutionId: environment.institutionId,
+      mode: this.config.mode,
       status: this.config.configured ? "connecting" : "not_connected",
       consentStatus: this.config.configured ? "pending" : "not_started",
       consentStartedAt: this.config.configured ? now : null,
@@ -675,6 +722,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         providerUserId,
         institutionName: attempt.institutionName,
         institutionId: attempt.institutionId,
+        mode: this.config.mode,
         status: "connected",
         consentStatus: "active",
         consentStartedAt: now,
@@ -700,6 +748,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       providerUserId: attempt?.providerUserId ?? null,
       institutionName: attempt?.institutionName ?? environment.institutionName,
       institutionId: attempt?.institutionId ?? environment.institutionId,
+      mode: this.config.mode,
       status: this.config.configured ? "connected" : "not_connected",
       consentStatus: this.config.configured ? "active" : "not_started",
       consentStartedAt: this.config.configured ? now : null,
@@ -724,7 +773,6 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     if (client.getMe) {
       await client.getMe(providerContext);
     }
-    const rawAccounts = await client.getAccounts(providerContext);
     // Cards are an optional, off-by-default capability. Only request them when
     // explicitly enabled AND the scope is configured AND (if the consent scopes
     // are known) the consent granted cards. A cards failure is non-blocking.
@@ -733,12 +781,47 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       this.config.scopes.includes("cards") &&
       (!providerContext.consentScopes || providerContext.consentScopes.includes("cards")) &&
       Boolean(client.getCards);
+
+    // Card-only providers (e.g. Amex via TrueLayer) return 501 / endpoint_not_supported
+    // on /accounts. Fall through to /cards when card support is enabled+consented;
+    // otherwise surface a safe "reconnect with card access" message rather than a
+    // generic access-denied. This never marks the token as bad.
+    let rawAccounts: unknown[] = [];
+    let accountsEndpointUnsupported = false;
+    try {
+      rawAccounts = await client.getAccounts(providerContext);
+    } catch (error) {
+      const reason = error instanceof ProviderSafeError ? error.safeReason : undefined;
+      if (reason !== "truelayer_accounts_endpoint_not_supported") {
+        throw error;
+      }
+      accountsEndpointUnsupported = true;
+      logServerEvent({
+        level: "warn",
+        event: "provider_sync_event",
+        message: "TrueLayer accounts endpoint unsupported; provider may be card-only.",
+        metadata: {
+          endpoint: "accounts",
+          reason,
+          cardsAllowed,
+          nonBlocking: cardsAllowed,
+        },
+      });
+      if (!cardsAllowed) {
+        // No card path available: card-only provider needs card access + reconnect.
+        throw error;
+      }
+    }
     let rawCards: unknown[] = [];
 
     if (cardsAllowed && client.getCards) {
       try {
         rawCards = await client.getCards(providerContext);
       } catch (error) {
+        if (accountsEndpointUnsupported) {
+          throw error;
+        }
+
         const reason =
           error instanceof ProviderSafeError
             ? error.safeReason ?? "truelayer_cards_access_denied"
@@ -754,8 +837,8 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         rawCards = [];
       }
     }
-    const accountIds = [...rawAccounts, ...rawCards]
-      .map((account) => (account as { account_id?: string; card_id?: string }).account_id ?? (account as { card_id?: string }).card_id)
+    const accountIds = rawAccounts
+      .map((account) => (account as { account_id?: string }).account_id)
       .filter(Boolean) as string[];
     const balances = client.getBalances
       ? await client.getBalances({
@@ -777,10 +860,10 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         id: connectionId,
         institutionId:
           (account as { provider?: { provider_id?: string } }).provider?.provider_id ??
-          "truelayer_sandbox",
+          this.config.mode === "live" ? "truelayer_live" : "truelayer_sandbox",
         institutionName:
           (account as { provider?: { display_name?: string } }).provider?.display_name ??
-          "TrueLayer sandbox",
+          (this.config.mode === "live" ? "TrueLayer live" : "TrueLayer sandbox"),
       }),
     );
   }
@@ -820,7 +903,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
         providerConnectionId: connectionId,
         provider: "truelayer",
         status: "sync_failed",
-        message: "TrueLayer sandbox credentials are not configured.",
+        message: `TrueLayer ${this.config.mode} credentials are not configured.`,
         startedAt,
         finishedAt: nowIso(),
       };
@@ -836,7 +919,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       providerConnectionId: connectionId,
       provider: "truelayer",
       status: "syncing",
-      message: "TrueLayer sandbox sync requested.",
+      message: `TrueLayer ${this.config.mode} sync requested.`,
       startedAt,
       finishedAt: null,
     };
@@ -857,8 +940,8 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       id: connectionId,
       provider: "truelayer",
       providerUserId: null,
-      institutionName: "TrueLayer sandbox",
-      institutionId: "truelayer_sandbox",
+      institutionName: this.config.mode === "live" ? "TrueLayer live" : "TrueLayer sandbox",
+      institutionId: this.config.mode === "live" ? "truelayer_live" : "truelayer_sandbox",
       status: "disconnected",
       consentStatus: "revoked",
       consentStartedAt: null,

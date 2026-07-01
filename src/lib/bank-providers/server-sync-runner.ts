@@ -37,6 +37,7 @@ export async function runServerConnectionSync({
       providerConnectionId: tokenRecord?.providerConnectionId,
       tokenReference: tokenRecord?.tokenReference,
       providerAccountIds,
+      consentScopes: tokenRecord?.scopes,
     },
     dependencies: {
       upsertAccount: (account) => upsertServiceAccount(userId, account),

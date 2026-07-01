@@ -135,6 +135,9 @@ export default async function DashboardPage() {
   const subscriptionAndBillCount = dashboard.dataCounts.bills;
   const debtTotal = financeV2.debtFreedom.totalDebt;
   const overdraftUsed = financeV2.overdraft?.currentOverdraftUsed ?? 0;
+  const amexFunding = financeV2.creditCardFunding.find((item) =>
+    item.liabilityName.toLowerCase().includes("amex"),
+  );
 
   return (
     <div className="space-y-6">
@@ -232,6 +235,15 @@ export default async function DashboardPage() {
           icon={TrendingDown}
           tone={debtTotal > 0 ? "saffron" : "moss"}
         />
+        {amexFunding ? (
+          <StatCard
+            label="Amex funded balance"
+            value={formatCurrency(amexFunding.fundedBalance)}
+            detail={`${formatCurrency(amexFunding.unfundedBalance)} unfunded after reserved pocket cash`}
+            icon={WalletCards}
+            tone={amexFunding.unfundedBalance > 0 ? "saffron" : "moss"}
+          />
+        ) : null}
         <StatCard
           label="Overdraft used"
           value={formatCurrency(overdraftUsed)}

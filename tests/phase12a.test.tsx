@@ -18,9 +18,11 @@ import {
   type TrueLayerProviderConfig,
 } from "../src/lib/bank-providers/provider-config";
 import { getProviderAdapter } from "../src/lib/bank-providers/provider-service";
+import { ProviderSafeError } from "../src/lib/bank-providers/provider-errors";
 import { syncBankConnection } from "../src/lib/bank-providers/sync-workflow";
 import {
   buildTrueLayerAuthorizationUrl,
+  classifyTrueLayerFailure,
   TrueLayerProvider,
   truelayerAccountPayload,
   truelayerTransactionPayload,
@@ -212,6 +214,42 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(readiness.safeMessage).toContain("Open Banking is disabled");
   });
 
+  it("reports TrueLayer card readiness from the cards flag and scopes", () => {
+    const disabled = getTrueLayerSandboxReadiness({
+      OPEN_BANKING_PROVIDER: "truelayer",
+      OPEN_BANKING_ENABLED: "true",
+      TRUELAYER_CLIENT_ID: "client-id",
+      TRUELAYER_CLIENT_SECRET: "secret-value",
+      TRUELAYER_REDIRECT_URI: configuredTrueLayer.redirectUri!,
+      TOKEN_ENCRYPTION_KEY: "x".repeat(32),
+    } as unknown as NodeJS.ProcessEnv);
+    const scopeMissing = getTrueLayerSandboxReadiness({
+      OPEN_BANKING_PROVIDER: "truelayer",
+      OPEN_BANKING_ENABLED: "true",
+      TRUELAYER_CLIENT_ID: "client-id",
+      TRUELAYER_CLIENT_SECRET: "secret-value",
+      TRUELAYER_REDIRECT_URI: configuredTrueLayer.redirectUri!,
+      TRUELAYER_CARDS_ENABLED: "true",
+      TRUELAYER_SCOPES: "info accounts balance transactions offline_access",
+      TOKEN_ENCRYPTION_KEY: "x".repeat(32),
+    } as unknown as NodeJS.ProcessEnv);
+    const enabled = getTrueLayerSandboxReadiness({
+      OPEN_BANKING_PROVIDER: "truelayer",
+      OPEN_BANKING_ENABLED: "true",
+      TRUELAYER_CLIENT_ID: "client-id",
+      TRUELAYER_CLIENT_SECRET: "secret-value",
+      TRUELAYER_REDIRECT_URI: configuredTrueLayer.redirectUri!,
+      TRUELAYER_CARDS_ENABLED: "true",
+      TRUELAYER_SCOPES: "info accounts balance cards transactions offline_access",
+      TOKEN_ENCRYPTION_KEY: "x".repeat(32),
+    } as unknown as NodeJS.ProcessEnv);
+
+    expect(disabled.cardSupport).toBe("disabled");
+    expect(scopeMissing.cardSupport).toBe("enabled_scope_missing");
+    expect(scopeMissing.cardSupportMessage).toContain("cards scope is missing");
+    expect(enabled.cardSupport).toBe("enabled");
+  });
+
   it("selects mock, Moneyhub, and TrueLayer provider adapters", () => {
     expect(getProviderAdapter("mock")).toBeTruthy();
     expect(getProviderAdapter("moneyhub")).toBeTruthy();
@@ -307,6 +345,27 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(authorizationUrl.searchParams.get("scope")).toBe(
       "info accounts balance cards transactions offline_access",
     );
+  });
+
+  it("maps live TrueLayer account failures without sandbox wording", () => {
+    const failure = classifyTrueLayerFailure("accounts", 500, "live");
+
+    expect(failure.reason).toBe("truelayer_accounts_fetch_failed");
+    expect(failure.message).toContain("TrueLayer live accounts request failed");
+    expect(failure.message).not.toContain("sandbox");
+  });
+
+  it("maps accounts 501 to a card-only provider reason without marking tokens bad", () => {
+    const failure = classifyTrueLayerFailure(
+      "accounts",
+      501,
+      "live",
+      "endpoint_not_supported",
+    );
+
+    expect(failure.reason).toBe("truelayer_accounts_endpoint_not_supported");
+    expect(failure.message).toContain("card-only");
+    expect(failure.message).not.toContain("token");
   });
 
   it("logs safe TrueLayer auth diagnostics without secrets or tokens", async () => {
@@ -470,6 +529,98 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(transactions.size).toBe(3);
     expect(syncEvents.some((event) => event.provider === "truelayer")).toBe(true);
     expect([...accounts.values()].some((account) => account.provider === "truelayer")).toBe(true);
+  });
+
+  it("does not call cards for a normal bank sync when cards are disabled", async () => {
+    const client = truelayerClient();
+    const provider = new TrueLayerProvider(
+      {
+        ...configuredTrueLayer,
+        scopes: ["info", "accounts", "balance", "transactions", "offline_access"],
+        cardsEnabled: false,
+      },
+      async () => client,
+    );
+
+    await provider.getAccounts("conn_truelayer_test", {
+      tokenReference: "valid-access-token",
+      consentScopes: ["info", "accounts", "balance", "transactions", "offline_access"],
+    });
+
+    expect(client.getCards).not.toHaveBeenCalled();
+  });
+
+  it("shows card access required when a card-only provider is connected without cards enabled", async () => {
+    const client = truelayerClient({
+      getAccounts: vi.fn(async () => {
+        throw new ProviderSafeError(
+          "provider_sync_failed",
+          "Unsupported accounts endpoint.",
+          501,
+          "truelayer_accounts_endpoint_not_supported",
+        );
+      }),
+    });
+    const provider = new TrueLayerProvider(
+      {
+        ...configuredTrueLayer,
+        scopes: ["info", "accounts", "balance", "transactions", "offline_access"],
+        cardsEnabled: false,
+      },
+      async () => client,
+    );
+
+    await expect(
+      provider.getAccounts("conn_truelayer_test", {
+        tokenReference: "valid-access-token",
+        consentScopes: ["info", "accounts", "balance", "transactions", "offline_access"],
+      }),
+    ).rejects.toMatchObject({
+      safeReason: "truelayer_accounts_endpoint_not_supported",
+    });
+    expect(client.getCards).not.toHaveBeenCalled();
+  });
+
+  it("attempts cards for a card-only provider when card support and consent are present", async () => {
+    const client = truelayerClient({
+      getAccounts: vi.fn(async () => {
+        throw new ProviderSafeError(
+          "provider_sync_failed",
+          "Unsupported accounts endpoint.",
+          501,
+          "truelayer_accounts_endpoint_not_supported",
+        );
+      }),
+      getCards: vi.fn(async () => [
+        {
+          card_id: "tl_card_amex",
+          display_name: "American Express Platinum",
+          current_balance: 250,
+          available_balance: 1750,
+          credit_limit: 2000,
+          currency: "GBP",
+          provider: {
+            display_name: "American Express",
+            provider_id: "amex",
+          },
+        },
+      ]),
+      getBalances: vi.fn(async () => []),
+    });
+    const provider = new TrueLayerProvider(configuredTrueLayer, async () => client);
+    const accounts = await provider.getAccounts("conn_truelayer_test", {
+      tokenReference: "valid-access-token",
+      consentScopes: ["info", "accounts", "balance", "cards", "transactions", "offline_access"],
+    });
+
+    expect(client.getCards).toHaveBeenCalled();
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0]).toMatchObject({
+      institutionName: "American Express",
+      type: "credit_card",
+      balance: -250,
+      creditLimit: 2000,
+    });
   });
 
   it("revokes TrueLayer safely without exposing tokens", async () => {

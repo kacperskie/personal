@@ -110,8 +110,18 @@ function isOwnAccountTransfer(transaction: Transaction) {
   return transaction.kind === "transfer" || transaction.flags.includes("own_account_transfer");
 }
 
-function accountBalanceForCash(account: Account) {
-  return Math.max(account.availableBalance ?? account.balance, 0);
+export function calculateAccountCashBalance(account: Account) {
+  if (account.type === "credit_card" || account.type === "loan" || account.purpose === "ignore") {
+    return 0;
+  }
+
+  if (account.balance <= 0) {
+    return 0;
+  }
+
+  const providerAvailable = account.availableBalance ?? account.balance;
+
+  return Math.max(Math.min(providerAvailable, account.balance), 0);
 }
 
 function accountIsLiquid(account: Account) {
@@ -167,7 +177,7 @@ export function calculateTotalCurrentCash(
       (account) =>
         account.includeInCashflow && isUsableAccount(account) && accountIsLiquid(account),
     )
-    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+    .reduce((total, account) => total + calculateAccountCashBalance(account), 0);
 
   const manualCash = manualFinanceItems
     .filter(manualItemAffectsCurrentCash)
@@ -179,19 +189,19 @@ export function calculateTotalCurrentCash(
 export function calculateSafeToSpendEligibleCash(accounts: Account[]) {
   return accounts
     .filter((account) => account.includeInSafeToSpend && isUsableAccount(account))
-    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+    .reduce((total, account) => total + calculateAccountCashBalance(account), 0);
 }
 
 export function calculateBillsAccountBalance(accounts: Account[]) {
   return accounts
     .filter((account) => account.isBillsAccount && isUsableAccount(account))
-    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+    .reduce((total, account) => total + calculateAccountCashBalance(account), 0);
 }
 
 export function calculateCashflowAccountBalance(accounts: Account[]) {
   return accounts
     .filter((account) => account.includeInCashflow && isUsableAccount(account))
-    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+    .reduce((total, account) => total + calculateAccountCashBalance(account), 0);
 }
 
 export function getUpcomingManualCashflowItems(
@@ -531,7 +541,7 @@ export function calculateLinkedSavingsGoalBalance(accounts: Account[], goalId: s
         isUsableAccount(account) &&
         account.isSavingsAccount,
     )
-    .reduce((total, account) => total + accountBalanceForCash(account), 0);
+    .reduce((total, account) => total + calculateAccountCashBalance(account), 0);
 }
 
 export function calculateLinkedSavingsGoalBalances(
@@ -619,7 +629,9 @@ export function calculateDebtSummary(
       (account) =>
         isUsableAccount(account) &&
         account.balance < 0 &&
-        (account.type === "credit_card" || account.type === "loan") &&
+        (account.type === "credit_card" ||
+          account.type === "loan" ||
+          account.purpose === "overdraft_account") &&
         !debtAccountIds.has(account.id),
     )
     .map((account) => ({

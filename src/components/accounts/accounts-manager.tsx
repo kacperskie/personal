@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { Landmark, Save, ShieldCheck, WalletCards } from "lucide-react";
 import { saveAccountAssignmentAction } from "@/app/accounts/actions";
 import { StatusPill } from "@/components/status-pill";
+import { accountPurposeDefaults, accountPurposeLabels } from "@/lib/account-purpose";
 import type {
   Account,
   AccountPurpose,
@@ -28,26 +29,7 @@ const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warnin
   disconnected: "neutral",
 };
 
-const purposeLabels: Record<AccountPurpose, string> = {
-  main_current_account: "Main current account",
-  bills_account: "Bills account",
-  everyday_spending: "Everyday spending",
-  emergency_fund: "Emergency fund",
-  short_term_savings: "Short-term savings",
-  pocket: "Pocket (money set aside for spending)",
-  holiday_fund: "Holiday fund",
-  pet_fund: "Pet fund",
-  house_deposit: "House deposit",
-  credit_card: "Credit card",
-  loan_account: "Loan account",
-  pension: "Pension",
-  investment: "Investment",
-  cash: "Cash",
-  offline_account: "Offline account",
-  other: "Other",
-};
-
-const purposeOptions = Object.entries(purposeLabels) as [AccountPurpose, string][];
+const purposeOptions = Object.entries(accountPurposeLabels) as [AccountPurpose, string][];
 
 function labelStatus(status: string) {
   return status.replaceAll("_", " ");
@@ -107,6 +89,10 @@ export function AccountsManager({
         includeInCashflow: account.includeInCashflow,
         includeInNetWorth: account.includeInNetWorth,
         linkedGoalIds: account.linkedGoalIds,
+        reservedFor: account.reservedFor ?? null,
+        linkedLiabilityAccountId: account.linkedLiabilityAccountId ?? null,
+        overdraftLimit: account.overdraftLimit ?? null,
+        overdraftRepaymentTarget: account.overdraftRepaymentTarget ?? null,
       })
         .then(() => {
           setMessage(
@@ -203,11 +189,13 @@ export function AccountsManager({
                       className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink"
                       value={account.purpose}
                       aria-label={`${account.name} purpose`}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const purpose = event.target.value as AccountPurpose;
                         updateAccount(account.id, {
-                          purpose: event.target.value as AccountPurpose,
-                        })
-                      }
+                          purpose,
+                          ...accountPurposeDefaults(purpose),
+                        });
+                      }}
                     >
                       {purposeOptions.map(([value, label]) => (
                         <option key={value} value={value}>
@@ -234,6 +222,48 @@ export function AccountsManager({
                           {goal.name}
                         </option>
                       ))}
+                    </select>
+                  </label>
+                  <label className="text-sm text-ink/70">
+                    Reserved for
+                    <input
+                      className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink"
+                      value={account.reservedFor ?? ""}
+                      placeholder="e.g. amex"
+                      aria-label={`${account.name} reserved for`}
+                      onChange={(event) =>
+                        updateAccount(account.id, {
+                          reservedFor: event.target.value.trim() || null,
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="text-sm text-ink/70">
+                    Linked liability
+                    <select
+                      className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink"
+                      value={account.linkedLiabilityAccountId ?? ""}
+                      aria-label={`${account.name} linked liability account`}
+                      onChange={(event) =>
+                        updateAccount(account.id, {
+                          linkedLiabilityAccountId: event.target.value || null,
+                        })
+                      }
+                    >
+                      <option value="">No linked liability</option>
+                      {accountDrafts
+                        .filter(
+                          (candidate) =>
+                            candidate.id !== account.id &&
+                            (candidate.type === "credit_card" ||
+                              candidate.type === "loan" ||
+                              candidate.purpose === "overdraft_account"),
+                        )
+                        .map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.name}
+                          </option>
+                        ))}
                     </select>
                   </label>
                 </div>
@@ -277,6 +307,45 @@ export function AccountsManager({
                   />
                 </label>
               </div>
+
+              {account.purpose === "overdraft_account" ? (
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <label className="text-sm text-ink/70">
+                    Overdraft limit
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink"
+                      value={account.overdraftLimit ?? ""}
+                      onChange={(event) =>
+                        updateAccount(account.id, {
+                          overdraftLimit: event.target.value
+                            ? Math.max(Number(event.target.value), 0)
+                            : null,
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="text-sm text-ink/70">
+                    Repayment target
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      className="mt-1 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink"
+                      value={account.overdraftRepaymentTarget ?? ""}
+                      onChange={(event) =>
+                        updateAccount(account.id, {
+                          overdraftRepaymentTarget: event.target.value
+                            ? Math.max(Number(event.target.value), 0)
+                            : null,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              ) : null}
 
               <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,auto)] lg:items-end">
                 <div className="grid gap-4 lg:grid-cols-2">

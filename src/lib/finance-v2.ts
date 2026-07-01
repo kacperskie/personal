@@ -334,7 +334,7 @@ export type DebtInput = {
   minimumPayment: number;
   apr: number | null;
   priority?: number | null;
-  source?: "debt" | "manual";
+  source?: "debt" | "manual" | "account";
 };
 
 function isActiveDebtStatus(status: string) {
@@ -348,6 +348,7 @@ function isActiveDebtStatus(status: string) {
 export function buildDebtInputs(
   debts: Debt[],
   manualFinanceItems: ManualFinanceItem[] = [],
+  accounts: Account[] = [],
 ): DebtInput[] {
   const debtInputs: DebtInput[] = debts
     .filter((debt) => isActiveDebtStatus(debt.status) && debt.balance > 0)
@@ -378,7 +379,29 @@ export function buildDebtInputs(
       source: "manual",
     }));
 
-  return [...debtInputs, ...manualInputs];
+  const accountInputs: DebtInput[] = accounts
+    .filter(
+      (account) =>
+        account.status === "active" &&
+        account.balance < 0 &&
+        (account.type === "credit_card" ||
+          account.type === "loan" ||
+          account.purpose === "overdraft_account"),
+    )
+    .map((account) => ({
+      id: account.id,
+      name: account.name,
+      balance: Math.abs(account.balance),
+      minimumPayment:
+        account.purpose === "overdraft_account"
+          ? account.overdraftRepaymentTarget ?? 0
+          : 0,
+      apr: null,
+      priority: null,
+      source: "account" as const,
+    }));
+
+  return [...debtInputs, ...manualInputs, ...accountInputs];
 }
 
 /**

@@ -938,8 +938,11 @@ Account purposes:
 - `main_current_account`
 - `bills_account`
 - `everyday_spending`
+- `overdraft_account`
 - `emergency_fund`
 - `short_term_savings`
+- `pocket`
+- `savings`
 - `holiday_fund`
 - `pet_fund`
 - `house_deposit`
@@ -949,7 +952,14 @@ Account purposes:
 - `investment`
 - `cash`
 - `offline_account`
+- `ignore`
 - `other`
+
+Account interpretation fields include `includeInSafeToSpend`,
+`includeInCashflow`, `includeInNetWorth`, optional `reservedFor`, optional
+`linkedLiabilityAccountId`, optional `overdraftLimit`, and optional
+`overdraftRepaymentTarget`. Credit card available credit and overdraft limits are
+never counted as cash or safe-to-spend.
 
 Manual items are included deterministically:
 

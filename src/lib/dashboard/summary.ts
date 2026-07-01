@@ -107,7 +107,18 @@ export type DashboardFinanceV2Summary = {
   paydayAllocation: PaydayAllocation | null;
   overdraft: OverdraftProjection | null;
   debtFreedom: DebtFreedomSummary;
+  creditCardFunding: CreditCardFundingSummary[];
   nextBestAction: NextBestAction;
+};
+
+export type CreditCardFundingSummary = {
+  liabilityAccountId: string;
+  liabilityName: string;
+  balance: number;
+  reservedBalance: number;
+  fundedBalance: number;
+  unfundedBalance: number;
+  reservedAccountIds: string[];
 };
 
 export type DashboardSummaryData = {
@@ -310,6 +321,52 @@ function nextDebtDue(
   return [...debtDue, ...manualDue].sort((a, b) => b.amount - a.amount)[0] ?? null;
 }
 
+function normaliseReservedFor(value: string | null | undefined) {
+  return value?.toLowerCase().replace(/[^a-z0-9]+/g, "") ?? "";
+}
+
+function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSummary[] {
+  const reservedAccounts = accounts.filter(
+    (account) =>
+      account.status === "active" &&
+      account.purpose === "pocket" &&
+      account.includeInNetWorth &&
+      account.balance > 0,
+  );
+
+  return accounts
+    .filter(
+      (account) =>
+        account.status === "active" &&
+        account.type === "credit_card" &&
+        account.includeInNetWorth,
+    )
+    .map((liability) => {
+      const liabilityText = `${liability.institutionName} ${liability.name} ${liability.officialName}`.toLowerCase();
+      const matchingReserved = reservedAccounts.filter(
+        (account) =>
+          account.linkedLiabilityAccountId === liability.id ||
+          (normaliseReservedFor(account.reservedFor) === "amex" &&
+            (liabilityText.includes("amex") ||
+              liabilityText.includes("american express"))),
+      );
+      const balance = Math.abs(Math.min(liability.balance, 0));
+      const reservedBalance = matchingReserved.reduce((total, account) => total + account.balance, 0);
+      const fundedBalance = Math.min(balance, reservedBalance);
+
+      return {
+        liabilityAccountId: liability.id,
+        liabilityName: liability.name,
+        balance,
+        reservedBalance,
+        fundedBalance,
+        unfundedBalance: Math.max(balance - reservedBalance, 0),
+        reservedAccountIds: matchingReserved.map((account) => account.id),
+      };
+    })
+    .filter((summary) => summary.balance > 0 || summary.reservedBalance > 0);
+}
+
 export function buildDashboardSummaryFromData(
   data: DashboardSummaryData,
   asOfDate = isoToday(),
@@ -386,24 +443,36 @@ export function buildDashboardSummaryFromData(
     data.overdraftPlans.find((plan) => plan.status === "active") ??
     data.overdraftPlans.find((plan) => plan.status === "overdraft_free") ??
     null;
+  const inferredOverdraftAccount =
+    data.accounts.find(
+      (account) => account.purpose === "overdraft_account" && account.status === "active",
+    ) ?? null;
   const overdraftAccount = overdraftPlan
     ? data.accounts.find((account) => account.id === overdraftPlan.linkedAccountId)
-    : null;
-  const overdraft = overdraftPlan
+    : inferredOverdraftAccount;
+  const overdraft = overdraftAccount || overdraftPlan
     ? calculateOverdraftProjection({
-        linkedAccountId: overdraftPlan.linkedAccountId,
-        overdraftLimit: overdraftPlan.overdraftLimit,
+        linkedAccountId: overdraftPlan?.linkedAccountId ?? overdraftAccount?.id ?? null,
+        overdraftLimit:
+          overdraftPlan?.overdraftLimit ??
+          overdraftAccount?.overdraftLimit ??
+          overdraftAccount?.creditLimit ??
+          0,
         currentOverdraftUsed:
           overdraftAccount && overdraftAccount.balance < 0
             ? Math.abs(overdraftAccount.balance)
-            : overdraftPlan.currentOverdraftUsed,
-        targetReductionPerPayday: overdraftPlan.targetReductionPerPayday,
-        projectedBalanceBeforePayday: overdraftAccount?.balance ?? -overdraftPlan.currentOverdraftUsed,
+            : overdraftPlan?.currentOverdraftUsed ?? 0,
+        targetReductionPerPayday:
+          overdraftPlan?.targetReductionPerPayday ??
+          overdraftAccount?.overdraftRepaymentTarget ??
+          0,
+        projectedBalanceBeforePayday:
+          overdraftAccount?.balance ?? -(overdraftPlan?.currentOverdraftUsed ?? 0),
         paydayDate: nextPaydayDate,
       })
     : null;
   const debtFreedom = calculateDebtFreedomSummary({
-    debts: buildDebtInputs(data.debts, data.manualFinanceItems),
+    debts: buildDebtInputs(data.debts, data.manualFinanceItems, data.accounts),
     strategy: "avalanche",
     extraPaymentAvailable: Math.max(safeToSpend - data.profile.minimumBuffer, 0),
     startDate: asOfDate,
@@ -478,6 +547,7 @@ export function buildDashboardSummaryFromData(
       paydayAllocation,
       overdraft,
       debtFreedom,
+      creditCardFunding: creditCardFundingSummaries(data.accounts),
       nextBestAction,
     },
     budgetHealth,

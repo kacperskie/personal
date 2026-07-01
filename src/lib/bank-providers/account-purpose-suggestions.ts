@@ -1,3 +1,4 @@
+import { accountPurposeDefaults } from "@/lib/account-purpose";
 import type {
   AccountPurpose,
   AccountRole,
@@ -15,6 +16,10 @@ export type AccountPurposeSuggestion = {
   isSpendingAccount: boolean;
   isBillsAccount: boolean;
   isSavingsAccount: boolean;
+  reservedFor?: string | null;
+  linkedLiabilityAccountId?: string | null;
+  overdraftLimit?: number | null;
+  overdraftRepaymentTarget?: number | null;
   reason: string;
 };
 
@@ -23,62 +28,23 @@ function textFor(account: ProviderAccount) {
 }
 
 function defaultRoleForType(type: AccountType): AccountRole {
-  if (type === "credit_card") {
-    return "credit";
-  }
-
-  if (type === "loan") {
-    return "loan";
-  }
-
-  if (type === "savings") {
-    return "savings";
-  }
-
-  if (type === "isa" || type === "investment") {
-    return "investment";
-  }
-
-  if (type === "pension") {
-    return "pension";
-  }
-
-  if (type === "cash") {
-    return "cash";
-  }
-
+  if (type === "credit_card") return "credit";
+  if (type === "loan") return "loan";
+  if (type === "savings") return "savings";
+  if (type === "isa" || type === "investment") return "investment";
+  if (type === "pension") return "pension";
+  if (type === "cash") return "cash";
   return "spending";
 }
 
 function defaultPurposeForType(type: AccountType, subtype: AccountSubtype): AccountPurpose {
-  if (type === "credit_card") {
-    return "credit_card";
-  }
-
-  if (type === "loan") {
-    return "loan_account";
-  }
-
-  if (subtype === "pocket") {
-    return "pocket";
-  }
-
-  if (type === "savings" || subtype === "vault") {
-    return "short_term_savings";
-  }
-
-  if (type === "isa" || type === "investment") {
-    return "investment";
-  }
-
-  if (type === "pension") {
-    return "pension";
-  }
-
-  if (type === "cash") {
-    return "cash";
-  }
-
+  if (type === "credit_card") return "credit_card";
+  if (type === "loan") return "loan_account";
+  if (subtype === "pocket") return "pocket";
+  if (type === "savings" || subtype === "vault") return "short_term_savings";
+  if (type === "isa" || type === "investment") return "investment";
+  if (type === "pension") return "pension";
+  if (type === "cash") return "cash";
   return "main_current_account";
 }
 
@@ -105,103 +71,89 @@ function baseSuggestion(account: ProviderAccount): AccountPurposeSuggestion {
   };
 }
 
+function purposeSuggestion(
+  purpose: AccountPurpose,
+  reason: string,
+  extras: Partial<AccountPurposeSuggestion> = {},
+): AccountPurposeSuggestion {
+  return {
+    purpose,
+    ...accountPurposeDefaults(purpose),
+    reason,
+    ...extras,
+  };
+}
+
 export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeSuggestion {
   const text = textFor(account);
   const base = baseSuggestion(account);
 
-  // A provider "pocket" is unambiguously money set aside for spending (e.g. an
-  // Amex pocket in Revolut) — classify it before merchant-name heuristics so a
-  // pocket named after a card is not mistaken for a credit card.
   if (account.subtype === "pocket") {
-    return {
-      ...base,
-      purpose: "pocket",
-      accountRole: "savings",
-      includeInCashflow: false,
-      includeInSafeToSpend: false,
-      isSpendingAccount: false,
-      isSavingsAccount: true,
-      reason:
-        "Pockets hold money set aside for specific spending (e.g. an Amex pocket) and are excluded from safe-to-spend.",
-    };
+    return purposeSuggestion("pocket", "Pockets hold reserved money and are excluded from safe-to-spend.", {
+      reservedFor: text.includes("amex") || text.includes("american express") ? "amex" : null,
+    });
   }
 
-  if (text.includes("american express") || text.includes("amex")) {
-    return {
-      ...base,
-      purpose: "credit_card",
-      accountRole: "credit",
-      includeInCashflow: true,
-      includeInNetWorth: true,
-      includeInSafeToSpend: false,
-      isSpendingAccount: false,
-      isBillsAccount: false,
-      isSavingsAccount: false,
-      reason: "American Express is treated as a credit card liability by default.",
-    };
+  if (
+    account.type === "credit_card" ||
+    text.includes("american express") ||
+    text.includes("amex")
+  ) {
+    return purposeSuggestion(
+      "credit_card",
+      "Card providers and American Express are treated as credit card liabilities by default.",
+    );
+  }
+
+  if (
+    account.type === "current_account" &&
+    (account.balance < 0 ||
+      text.includes("overdraft") ||
+      text.includes("graduate") ||
+      text.includes("grad account"))
+  ) {
+    return purposeSuggestion(
+      "overdraft_account",
+      "Current accounts with an overdraft signal are excluded from safe-to-spend and tracked as overdraft debt.",
+      {
+        overdraftLimit: account.creditLimit,
+      },
+    );
   }
 
   if (text.includes("nationwide")) {
     if (account.type === "savings") {
-      return {
-        ...base,
-        purpose: "emergency_fund",
-        accountRole: "savings",
-        includeInCashflow: false,
-        includeInSafeToSpend: false,
-        isSpendingAccount: false,
-        isSavingsAccount: true,
-        reason: "Nationwide savings accounts are treated as ringfenced savings by default.",
-      };
+      return purposeSuggestion(
+        "emergency_fund",
+        "Nationwide savings accounts are treated as ringfenced savings by default.",
+      );
     }
 
     if (text.includes("bill")) {
-      return {
-        ...base,
-        purpose: "bills_account",
-        accountRole: "bills",
-        includeInCashflow: true,
-        includeInSafeToSpend: false,
-        isSpendingAccount: false,
-        isBillsAccount: true,
-        reason: "Nationwide bills-style accounts are excluded from safe-to-spend by default.",
-      };
+      return purposeSuggestion(
+        "bills_account",
+        "Nationwide bills-style accounts are excluded from safe-to-spend by default.",
+      );
     }
 
-    return {
-      ...base,
-      purpose: "main_current_account",
-      accountRole: "spending",
-      includeInCashflow: true,
-      includeInSafeToSpend: true,
-      isSpendingAccount: true,
-      reason: "Nationwide current accounts are suggested as main current accounts.",
-    };
+    return purposeSuggestion(
+      "main_current_account",
+      "Nationwide current accounts are suggested as main current accounts.",
+    );
   }
 
   if (text.includes("revolut")) {
     if (account.type === "savings" || account.subtype === "vault") {
-      return {
-        ...base,
-        purpose: "short_term_savings",
-        accountRole: "savings",
-        includeInCashflow: false,
-        includeInSafeToSpend: false,
-        isSpendingAccount: false,
-        isSavingsAccount: true,
-        reason: "Revolut vault-like balances are treated as short-term savings.",
-      };
+      return purposeSuggestion(
+        "short_term_savings",
+        "Revolut vault-like balances are treated as short-term savings.",
+      );
     }
 
-    return {
-      ...base,
-      purpose: "everyday_spending",
-      accountRole: "spending",
-      includeInCashflow: true,
-      includeInSafeToSpend: true,
-      isSpendingAccount: true,
-      reason: "Revolut current accounts are suggested as everyday spending accounts.",
-    };
+    return purposeSuggestion(
+      "everyday_spending",
+      "Revolut current accounts are suggested as everyday spending accounts.",
+    );
   }
 
   return base;

@@ -17,7 +17,7 @@ import type {
   Transaction,
   TransactionEnrichment,
 } from "@/lib/domain";
-import { calculateSafeToSpendAmount } from "@/lib/finance";
+import { calculateAccountCashBalance, calculateSafeToSpendAmount } from "@/lib/finance";
 import { formatCurrency } from "@/lib/format";
 import { getPrivacySafeNotificationCopy } from "@/lib/notifications";
 
@@ -711,10 +711,10 @@ export function forecastCashflow({
 }) {
   const startingCash = accounts
     .filter((account) => account.includeInCashflow && account.status !== "inactive")
-    .reduce((total, account) => total + Math.max(account.availableBalance ?? account.balance, 0), 0);
+    .reduce((total, account) => total + calculateAccountCashBalance(account), 0);
   const billsAccountBalance = accounts
     .filter((account) => account.isBillsAccount && account.includeInCashflow)
-    .reduce((total, account) => total + Math.max(account.availableBalance ?? account.balance, 0), 0);
+    .reduce((total, account) => total + calculateAccountCashBalance(account), 0);
   const inflows = events
     .filter((event) => event.includeInCashflow && event.direction === "inflow")
     .reduce((total, event) => total + event.amount, 0);
@@ -731,7 +731,7 @@ export function forecastCashflow({
 
     return {
       accountId: account.id,
-      projectedBalance: (account.availableBalance ?? account.balance) + accountInflows - accountOutflows,
+      projectedBalance: account.balance + accountInflows - accountOutflows,
     };
   });
   const projectedBillsAccountBalance = projectedBalances

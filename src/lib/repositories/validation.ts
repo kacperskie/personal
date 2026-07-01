@@ -8,6 +8,10 @@ export type AccountUpdatePayload = Pick<
   | "includeInCashflow"
   | "includeInNetWorth"
   | "linkedGoalIds"
+  | "reservedFor"
+  | "linkedLiabilityAccountId"
+  | "overdraftLimit"
+  | "overdraftRepaymentTarget"
 >;
 
 export function createAccountUpdatePayload(input: AccountUpdatePayload) {
@@ -18,6 +22,16 @@ export function createAccountUpdatePayload(input: AccountUpdatePayload) {
     includeInCashflow: input.includeInCashflow,
     includeInNetWorth: input.includeInNetWorth,
     linkedGoalIds: input.linkedGoalIds,
+    reservedFor: input.reservedFor ?? null,
+    linkedLiabilityAccountId: input.linkedLiabilityAccountId ?? null,
+    overdraftLimit:
+      input.overdraftLimit === null || input.overdraftLimit === undefined
+        ? null
+        : Math.max(Number(input.overdraftLimit), 0),
+    overdraftRepaymentTarget:
+      input.overdraftRepaymentTarget === null || input.overdraftRepaymentTarget === undefined
+        ? null
+        : Math.max(Number(input.overdraftRepaymentTarget), 0),
   };
 }
 
