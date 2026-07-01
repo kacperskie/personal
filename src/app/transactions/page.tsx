@@ -7,6 +7,7 @@ import {
   markTransactionNotTransferAction,
   markTransactionTransferAction,
   quickTransactionBudgetOverrideAction,
+  recategoriseCreditCardTransactionsAction,
   updateTransactionBudgetOverrideAction,
   updateTransactionEnrichmentAction,
 } from "@/app/transactions/actions";
@@ -31,6 +32,7 @@ import {
   type TransactionBudgetTreatment,
 } from "@/lib/finance-interpretation";
 import { financeCategories } from "@/lib/transaction-intelligence";
+import { planCreditCardRecategorisation } from "@/lib/transactions/recategorise";
 import { formatCurrency, formatDateShort } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -131,6 +133,12 @@ export default async function TransactionsPage() {
   const newTransactionsSinceLastReview = visibleTransactions.filter(
     (transaction) => transaction.status === "needs_review" || transaction.status === "suggested",
   ).length;
+  // Credit-card rows saved as cat_income before card sign-awareness existed;
+  // re-sync preserves the wrong category, so offer an explicit one-off fix.
+  const creditCardIncomeToFix = planCreditCardRecategorisation(
+    visibleTransactions,
+    visibleAccounts,
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -143,6 +151,22 @@ export default async function TransactionsPage() {
             : "Mock and synced provider transactions for review, categorisation and budget inclusion."
         }
       />
+
+      {creditCardIncomeToFix > 0 ? (
+        <form
+          action={recategoriseCreditCardTransactionsAction}
+          className="flex flex-col gap-3 rounded-lg border border-saffron/30 bg-saffron/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-sm text-ink/80">
+            {creditCardIncomeToFix} credit-card transaction
+            {creditCardIncomeToFix === 1 ? " is" : "s are"} miscategorised as income (a legacy sign
+            issue). Re-syncing will not fix them.
+          </p>
+          <button className="min-h-11 shrink-0 rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">
+            Fix credit-card categories
+          </button>
+        </form>
+      ) : null}
 
       <TransactionsExplorer
         transactions={visibleTransactions}

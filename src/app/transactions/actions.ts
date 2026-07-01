@@ -12,6 +12,8 @@ import {
 } from "@/lib/repositories/finance-repository";
 import type { FinanceCategory, TransactionBudgetExclusionReason } from "@/lib/domain";
 import { createTransactionBudgetOverride } from "@/lib/finance-interpretation";
+import { planCreditCardRecategorisation } from "@/lib/transactions/recategorise";
+import { upsertTransaction } from "@/lib/repositories/finance-repository";
 import { updateTransactionEnrichmentReview } from "@/lib/transaction-intelligence";
 
 async function findEnrichment(id: string) {
@@ -240,6 +242,24 @@ export async function quickTransactionBudgetOverrideAction(
       changes: changesByAction,
     }),
   );
+  revalidatePath("/transactions");
+  revalidatePath("/");
+}
+
+/**
+ * Fix already-stored credit-card transactions that were saved as cat_income
+ * before card sign/category awareness existed. Re-sync will not fix them because
+ * mergeSyncedTransaction preserves the existing category. Deterministic + safe:
+ * only touches credit-card cat_income rows.
+ */
+export async function recategoriseCreditCardTransactionsAction() {
+  const [transactions, accounts] = await Promise.all([getTransactions(), getAccounts()]);
+  const corrected = planCreditCardRecategorisation(transactions, accounts);
+
+  for (const transaction of corrected) {
+    await upsertTransaction(transaction);
+  }
+
   revalidatePath("/transactions");
   revalidatePath("/");
 }
