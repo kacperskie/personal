@@ -777,7 +777,33 @@ export function truelayerAccountPayload(
   };
 }
 
-export function truelayerTransactionPayload(transaction: unknown): ProviderTransactionPayload {
+function stableFallbackTransactionId(input: {
+  providerAccountId: string | undefined;
+  date: string | undefined;
+  amount: number | undefined;
+  description: string | undefined;
+  status: string | undefined;
+}) {
+  const text = [
+    input.providerAccountId ?? "unknown_account",
+    input.date ?? "unknown_date",
+    input.amount ?? "unknown_amount",
+    input.description ?? "unknown_description",
+    input.status ?? "unknown_status",
+  ].join("|");
+  let hash = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+
+  return `derived_${hash.toString(16)}`;
+}
+
+export function truelayerTransactionPayload(
+  transaction: unknown,
+  fallbackProviderAccountId?: string,
+): ProviderTransactionPayload {
   const payload = transaction as {
     transaction_id?: string;
     normalised_provider_transaction_id?: string;
@@ -802,6 +828,19 @@ export function truelayerTransactionPayload(transaction: unknown): ProviderTrans
     };
     status?: string;
   };
+  const providerAccountId = payload.account_id ?? payload.card_id ?? fallbackProviderAccountId;
+  const timestamp = payload.timestamp ?? payload.booking_datetime;
+  const description = payload.description ?? "TrueLayer transaction";
+  const providerTransactionId =
+    payload.transaction_id ??
+    payload.normalised_provider_transaction_id ??
+    stableFallbackTransactionId({
+      providerAccountId,
+      date: timestamp,
+      amount: payload.amount,
+      description,
+      status: payload.status ?? payload.transaction_type,
+    });
   const category =
     payload.transaction_category ??
     payload.meta?.provider_transaction_category ??
@@ -809,11 +848,11 @@ export function truelayerTransactionPayload(transaction: unknown): ProviderTrans
   const transferText = `${payload.description ?? ""} ${category ?? ""}`.toLowerCase();
 
   return {
-    id: payload.transaction_id ?? payload.normalised_provider_transaction_id,
-    transactionId: payload.transaction_id ?? payload.normalised_provider_transaction_id,
-    accountId: payload.account_id ?? payload.card_id,
-    date: payload.timestamp ?? payload.booking_datetime,
-    description: payload.description ?? "TrueLayer transaction",
+    id: providerTransactionId,
+    transactionId: providerTransactionId,
+    accountId: providerAccountId,
+    date: timestamp,
+    description,
     merchant: payload.merchant_name ?? payload.description,
     amount: payload.amount,
     currency: payload.currency ?? payload.running_balance?.currency,
@@ -1175,7 +1214,10 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     });
 
     return rawTransactions.map((payload) =>
-      mapProviderTransactionPayload(truelayerTransactionPayload(payload), connectionId),
+      mapProviderTransactionPayload(
+        truelayerTransactionPayload(payload, query?.providerAccountId),
+        connectionId,
+      ),
     );
   }
 

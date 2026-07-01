@@ -17,7 +17,10 @@ import {
   ProviderSafeError,
   toProviderSafeError,
 } from "../src/lib/bank-providers/provider-errors";
-import { syncBankConnection } from "../src/lib/bank-providers/sync-workflow";
+import {
+  syncBankConnection,
+  transactionSyncWindow,
+} from "../src/lib/bank-providers/sync-workflow";
 import type { OpenBankingProviderAdapter } from "../src/lib/bank-providers/types";
 import {
   saveProviderToken,
@@ -254,6 +257,24 @@ describe("phase 6 Open Banking sandbox foundation", () => {
     expect(result.auditEvents.map((event) => event.eventType)).toContain(
       "bank_connection_sync_completed",
     );
+  });
+
+  it("first transaction sync uses a 90-day range when no transaction sync exists", async () => {
+    expect(
+      transactionSyncWindow(
+        { ...baseConnection, lastTransactionSyncedAt: null },
+        "2026-07-01T12:00:00.000Z",
+      ),
+    ).toEqual({ dateFrom: "2026-04-02", dateTo: "2026-07-01" });
+  });
+
+  it("subsequent transaction sync uses last successful transaction sync with overlap", async () => {
+    expect(
+      transactionSyncWindow(
+        { ...baseConnection, lastTransactionSyncedAt: "2026-06-20T10:00:00.000Z" },
+        "2026-07-01T12:00:00.000Z",
+      ),
+    ).toEqual({ dateFrom: "2026-06-17", dateTo: "2026-07-01" });
   });
 
   it("sync workflow creates failure sync events and audit events", async () => {

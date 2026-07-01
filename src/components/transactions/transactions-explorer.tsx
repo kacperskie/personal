@@ -89,10 +89,12 @@ export function TransactionsExplorer({
   transactions,
   accounts,
   categories,
+  emptyMessage = "No transactions match these filters.",
 }: {
   transactions: Transaction[];
   accounts: Account[];
   categories: Category[];
+  emptyMessage?: string;
 }) {
   const [accountId, setAccountId] = useState("all");
   const [institution, setInstitution] = useState("all");
@@ -293,7 +295,7 @@ export function TransactionsExplorer({
 
       {filtered.length === 0 ? (
         <div className="border-t border-line p-6 text-sm text-ink/60">
-          No transactions match these filters.
+          {emptyMessage}
         </div>
       ) : null}
     </section>

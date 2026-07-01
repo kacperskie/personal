@@ -12,11 +12,18 @@ import {
 } from "@/app/transactions/actions";
 import {
   getAccounts,
+  getBankConnections,
   getCategories,
   getTransactionBudgetOverrides,
   getTransactionEnrichments,
   getTransactions,
 } from "@/lib/repositories/finance-repository";
+import {
+  isLiveTrueLayerMode,
+  partitionAccounts,
+  partitionConnections,
+  partitionTransactions,
+} from "@/lib/bank-providers/sandbox-data";
 import {
   getCreditCardTransactionEstimateTreatment,
   getTransactionBudgetTreatment,
@@ -29,22 +36,37 @@ import { formatCurrency, formatDateShort } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function TransactionsPage() {
-  const [transactions, accounts, categories, enrichments, budgetOverrides] = await Promise.all([
+  const [transactions, accounts, categories, enrichments, budgetOverrides, bankConnections] = await Promise.all([
     getTransactions(),
     getAccounts(),
     getCategories(),
     getTransactionEnrichments(),
     getTransactionBudgetOverrides(),
+    getBankConnections(),
   ]);
-  const transactionById = new Map(transactions.map((transaction) => [transaction.id, transaction]));
-  const accountById = new Map(accounts.map((account) => [account.id, account]));
+  const liveMode = isLiveTrueLayerMode();
+  const { live: liveAccounts, sandbox: sandboxAccounts } = partitionAccounts(
+    accounts,
+    bankConnections,
+  );
+  const visibleAccounts = liveMode ? liveAccounts : accounts;
+  const sandboxAccountIds = new Set(sandboxAccounts.map((account) => account.id));
+  const { live: liveTransactions, sandbox: sandboxTransactions } = partitionTransactions(
+    transactions,
+    sandboxAccountIds,
+  );
+  const visibleTransactions = liveMode ? liveTransactions : transactions;
+  const { live: liveConnections } = partitionConnections(bankConnections);
+  const visibleConnections = liveMode ? liveConnections : bankConnections;
+  const transactionById = new Map(visibleTransactions.map((transaction) => [transaction.id, transaction]));
+  const accountById = new Map(visibleAccounts.map((account) => [account.id, account]));
   const overrideByTransactionId = new Map(
     budgetOverrides.map((override) => [override.transactionId, override]),
   );
   const reviewEnrichments = enrichments
     .filter((enrichment) => enrichment.reviewStatus === "needs_review")
     .slice(0, 6);
-  const recentTransactions = transactions.slice(0, 20).map((transaction) => ({
+  const recentTransactions = visibleTransactions.slice(0, 20).map((transaction) => ({
     transaction,
     account: accountById.get(transaction.accountId) ?? null,
     treatment: getTransactionBudgetTreatment(
@@ -83,20 +105,133 @@ export default async function TransactionsPage() {
     ["savings_transfer", "Savings transfer"],
     ["ignored", "Ignored"],
   ] as const;
+  const transactionsByConnection = visibleConnections.map((connection) => {
+    const linkedAccountIds = new Set(
+      visibleAccounts
+        .filter((account) => account.providerConnectionId === connection.id)
+        .map((account) => account.id),
+    );
+    const linkedTransactions = visibleTransactions.filter((transaction) =>
+      linkedAccountIds.has(transaction.accountId),
+    );
+
+    return {
+      connection,
+      count: linkedTransactions.length,
+    };
+  });
+  const transactionsByAccount = visibleAccounts.map((account) => ({
+    account,
+    count: visibleTransactions.filter((transaction) => transaction.accountId === account.id).length,
+  }));
+  const hiddenSandboxTransactionCount = liveMode ? sandboxTransactions.length : 0;
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Connected account activity"
         title="Transactions"
-        description="Synced and mock provider transactions for review, categorisation, and own-account transfer handling."
+        description={
+          liveMode
+            ? "Live synced transactions for review, categorisation and budget inclusion."
+            : "Mock and synced provider transactions for review, categorisation and budget inclusion."
+        }
       />
 
       <TransactionsExplorer
-        transactions={transactions}
-        accounts={accounts}
+        transactions={visibleTransactions}
+        accounts={visibleAccounts}
         categories={categories}
+        emptyMessage={
+          visibleTransactions.length === 0
+            ? liveMode
+              ? "No live transactions synced yet. Run Sync on Connected Accounts; if the provider returns zero, the diagnostics below will show that per account."
+              : "No transactions are available yet."
+            : "No transactions match these filters."
+        }
       />
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold text-ink">Transaction sync diagnostics</h2>
+          <p className="text-sm text-ink/60">
+            Counts below come from the same user-owned transaction collection used by this page.
+          </p>
+        </div>
+        <dl className="grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <dt className="text-ink/50">Stored transactions</dt>
+            <dd className="mt-1 font-semibold text-ink">{visibleTransactions.length}</dd>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <dt className="text-ink/50">Linked accounts/cards</dt>
+            <dd className="mt-1 font-semibold text-ink">{visibleAccounts.length}</dd>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <dt className="text-ink/50">Provider connections</dt>
+            <dd className="mt-1 font-semibold text-ink">{visibleConnections.length}</dd>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-3">
+            <dt className="text-ink/50">Hidden sandbox transactions</dt>
+            <dd className="mt-1 font-semibold text-ink">{hiddenSandboxTransactionCount}</dd>
+          </div>
+        </dl>
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-line bg-paper p-4">
+            <p className="text-sm font-semibold text-ink">By connection</p>
+            <div className="mt-3 space-y-2 text-sm text-ink/70">
+              {transactionsByConnection.length > 0 ? (
+                transactionsByConnection.map(({ connection, count }) => (
+                  <div key={connection.id} className="rounded-lg border border-line bg-white p-3">
+                    <p className="font-semibold text-ink">
+                      {connection.providerName ?? connection.displayName ?? connection.institutionName}
+                    </p>
+                    <p className="mt-1">
+                      {count} stored - last range{" "}
+                      {connection.lastTransactionDateFrom ?? "unknown"} to{" "}
+                      {connection.lastTransactionDateTo ?? "unknown"}
+                    </p>
+                    <p className="mt-1">
+                      Last result: {connection.lastTransactionSyncStatus ?? "not run"}
+                      {typeof connection.lastTransactionReturnedCount === "number"
+                        ? ` - returned ${connection.lastTransactionReturnedCount}, stored ${connection.lastTransactionStoredCount ?? 0}, skipped ${connection.lastTransactionSkippedCount ?? 0}`
+                        : ""}
+                    </p>
+                    {connection.lastTransactionFailureReason ? (
+                      <p className="mt-1 text-berry">
+                        Failed at {connection.lastTransactionFailedEndpoint ?? "transaction endpoint"}:{" "}
+                        {connection.lastTransactionFailureReason}
+                      </p>
+                    ) : null}
+                    {connection.lastTransactionSyncMessage ? (
+                      <p className="mt-1">{connection.lastTransactionSyncMessage}</p>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <p>No provider connections are visible in this mode.</p>
+              )}
+            </div>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-4">
+            <p className="text-sm font-semibold text-ink">By account/card</p>
+            <div className="mt-3 space-y-2 text-sm text-ink/70">
+              {transactionsByAccount.length > 0 ? (
+                transactionsByAccount.map(({ account, count }) => (
+                  <p key={account.id} className="flex justify-between gap-3">
+                    <span>
+                      {account.name} - {account.institutionName}
+                    </span>
+                    <span className="font-semibold text-ink">{count}</span>
+                  </p>
+                ))
+              ) : (
+                <p>No accounts or cards are visible in this mode.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
         <div className="mb-4">
@@ -144,7 +279,7 @@ export default async function TransactionsPage() {
         <div className="grid gap-4">
           {recentTransactions.length === 0 ? (
             <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/60">
-              No transactions are available yet.
+              {liveMode ? "No live transactions synced yet." : "No transactions are available yet."}
             </div>
           ) : null}
           {recentTransactions.map(({ transaction, account, treatment, creditCardEstimateTreatment }) => (

@@ -400,6 +400,20 @@ describe("phase 7 Moneyhub sandbox proof of concept", () => {
     expect(html).toContain("Groceries");
   });
 
+  it("renders the live empty transaction message when no live transactions exist", () => {
+    const html = renderToStaticMarkup(
+      <TransactionsExplorer
+        transactions={[]}
+        accounts={[]}
+        categories={mockCategories}
+        emptyMessage="No live transactions synced yet."
+      />,
+    );
+
+    expect(html).toContain("No live transactions synced yet.");
+    expect(html).not.toContain("Synced and mock provider transactions");
+  });
+
   it("renders Amex statement balance metadata without exposing available credit as cash", () => {
     const amex: Account = {
       id: "acct_amex_statement",

@@ -136,6 +136,20 @@ describe("TrueLayer Data API path building", () => {
     expect(calledUrls.some((u) => u.includes("/data/v1/accounts/acc_1/transactions"))).toBe(true);
   });
 
+  it("builds /data/v1/cards/{id}/transactions for card accounts", async () => {
+    installFetch(okHandler);
+    const provider = new TrueLayerProvider(cardsEnabledConfig);
+    await provider.getTransactions("conn_tl", {
+      providerAccountId: "card_1",
+      providerAccountType: "credit_card",
+      tokenReference: SENTINEL_TOKEN,
+      dateFrom: "2026-04-02",
+      dateTo: "2026-07-01",
+    });
+
+    expect(calledUrls.some((u) => u.includes("/data/v1/cards/card_1/transactions"))).toBe(true);
+  });
+
   it("calls /me before /accounts", async () => {
     installFetch(okHandler);
     const provider = new TrueLayerProvider(config);

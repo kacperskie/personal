@@ -202,6 +202,17 @@ export type BankConnection = {
   consentCompletedAt?: string | null;
   consentExpiresAt: string | null;
   lastSyncedAt: string | null;
+  lastTransactionSyncedAt?: string | null;
+  lastTransactionSyncStartedAt?: string | null;
+  lastTransactionSyncStatus?: "success" | "failed" | "no_transactions" | null;
+  lastTransactionSyncMessage?: string | null;
+  lastTransactionDateFrom?: string | null;
+  lastTransactionDateTo?: string | null;
+  lastTransactionReturnedCount?: number | null;
+  lastTransactionStoredCount?: number | null;
+  lastTransactionSkippedCount?: number | null;
+  lastTransactionFailedEndpoint?: string | null;
+  lastTransactionFailureReason?: string | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;

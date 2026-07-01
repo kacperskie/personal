@@ -156,7 +156,6 @@ function truelayerClient(overrides: Partial<TrueLayerClientLike> = {}): TrueLaye
     getTransactions: vi.fn(async (query) => [
       {
         transaction_id: `tl_txn_${query.providerAccountId}`,
-        account_id: query.providerAccountId,
         timestamp: "2026-06-30T12:00:00.000Z",
         description: "TESCO STORES",
         merchant_name: "Tesco",
@@ -599,6 +598,26 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(transactions.size).toBe(3);
     expect(syncEvents.some((event) => event.provider === "truelayer")).toBe(true);
     expect([...accounts.values()].some((account) => account.provider === "truelayer")).toBe(true);
+    expect([...transactions.values()].every((transaction) => transaction.accountId !== "provider_account_unknown")).toBe(true);
+  });
+
+  it("maps TrueLayer transactions to the requested account when payload omits account_id", () => {
+    expect(
+      truelayerTransactionPayload(
+        {
+          transaction_id: "tl_txn_missing_account",
+          timestamp: "2026-06-30T12:00:00.000Z",
+          description: "TESCO STORES",
+          amount: -12.5,
+          currency: "GBP",
+          status: "posted",
+        },
+        "tl_account_current",
+      ),
+    ).toMatchObject({
+      accountId: "tl_account_current",
+      transactionId: "tl_txn_missing_account",
+    });
   });
 
   it("does not call cards for a normal bank sync when cards are disabled", async () => {

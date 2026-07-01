@@ -1,6 +1,7 @@
 import type {
   Account,
   BankConnection,
+  ProviderAccount,
   ProviderSyncEvent,
   Transaction,
 } from "@/lib/domain";
@@ -12,6 +13,7 @@ import {
   providerTransactionToTransaction,
 } from "@/lib/bank-providers/provider-mappers";
 import { createAuditEvent, type AuditEventInput } from "@/lib/repositories/audit";
+import { logServerEvent } from "@/lib/observability/server-logger";
 
 export type SyncWorkflowDependencies = {
   upsertAccount(account: Account): Promise<Account>;
@@ -50,6 +52,74 @@ function syncEvent(
   };
 }
 
+function dateOnly(value: string) {
+  return value.slice(0, 10);
+}
+
+function addDays(date: string, days: number) {
+  const timestamp = new Date(`${date.slice(0, 10)}T00:00:00.000Z`).getTime();
+  return new Date(timestamp + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+export function transactionSyncWindow(connection: BankConnection, syncStartedAt: string) {
+  const dateTo = dateOnly(syncStartedAt);
+  const lastTransactionSyncedAt = connection.lastTransactionSyncedAt ?? null;
+  const dateFrom = lastTransactionSyncedAt
+    ? addDays(lastTransactionSyncedAt, -3)
+    : addDays(dateTo, -90);
+
+  return { dateFrom, dateTo };
+}
+
+function safeIdSuffix(value: string | null | undefined) {
+  if (!value) return "unknown";
+  const clean = value.replace(/[^a-zA-Z0-9]/g, "");
+  return clean.slice(-6) || "unknown";
+}
+
+function transactionEndpointLabel(account: ProviderAccount) {
+  return account.type === "credit_card" ? "card_transactions" : "account_transactions";
+}
+
+function transactionPathTemplate(account: ProviderAccount) {
+  return account.type === "credit_card"
+    ? "/data/v1/cards/{card_id}/transactions"
+    : "/data/v1/accounts/{account_id}/transactions";
+}
+
+function logTransactionSyncDiagnostics(input: {
+  level?: "info" | "warn";
+  connection: BankConnection;
+  providerAccount: ProviderAccount;
+  dateFrom: string;
+  dateTo: string;
+  status: number | null;
+  returnedCount: number;
+  storedCount: number;
+  skippedCount: number;
+  reason?: string | null;
+}) {
+  logServerEvent({
+    level: input.level ?? "info",
+    event: "provider_sync_event",
+    message: "Provider transaction sync diagnostics.",
+    metadata: {
+      connectionId: input.connection.id,
+      provider: input.connection.provider,
+      endpointLabel: transactionEndpointLabel(input.providerAccount),
+      pathTemplate: transactionPathTemplate(input.providerAccount),
+      providerAccountIdSuffix: safeIdSuffix(input.providerAccount.providerAccountId),
+      responseStatus: input.status,
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      returnedCount: input.returnedCount,
+      storedCount: input.storedCount,
+      skippedCount: input.skippedCount,
+      reason: input.reason ?? null,
+    },
+  });
+}
+
 export async function syncBankConnection({
   userId,
   connection,
@@ -76,6 +146,8 @@ export async function syncBankConnection({
   const syncEvents: ProviderSyncEvent[] = [];
   const startedEvent = syncEvent(connection, "syncing", "Provider sync started.", startedAt, null);
   syncEvents.push(await dependencies.recordProviderSyncEvent(startedEvent));
+  let transactionFailureEndpoint: string | null = null;
+  let transactionFailureReason: string | null = null;
 
   try {
     const refreshEvent = await provider.refreshConnection(connection.id, providerContext);
@@ -104,22 +176,52 @@ export async function syncBankConnection({
     }
 
     let transactionsUpserted = 0;
+    let transactionsReturned = 0;
+    let transactionsSkipped = 0;
+    const transactionWindow = transactionSyncWindow(connection, startedAt);
 
     for (const providerAccount of providerAccounts) {
-      const providerTransactions = await provider.getTransactions(connection.id, {
-        dateFrom: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-        dateTo: startedAt.slice(0, 10),
-        providerAccountId: providerAccount.providerAccountId,
-        providerUserId: providerContext?.providerUserId,
-        providerConnectionId: providerContext?.providerConnectionId,
-        tokenReference: providerContext?.tokenReference,
-        providerAccountType: providerAccount.type,
-      });
+      let providerTransactions;
+      let storedForAccount = 0;
+      let skippedForAccount = 0;
+
+      try {
+        providerTransactions = await provider.getTransactions(connection.id, {
+          dateFrom: transactionWindow.dateFrom,
+          dateTo: transactionWindow.dateTo,
+          providerAccountId: providerAccount.providerAccountId,
+          providerUserId: providerContext?.providerUserId,
+          providerConnectionId: providerContext?.providerConnectionId,
+          tokenReference: providerContext?.tokenReference,
+          providerAccountType: providerAccount.type,
+        });
+      } catch (error) {
+        const safeError = toProviderSafeError(error, "provider_sync_failed");
+        transactionFailureEndpoint = transactionEndpointLabel(providerAccount);
+        transactionFailureReason = safeError.safeReason ?? safeError.code;
+        logTransactionSyncDiagnostics({
+          level: "warn",
+          connection,
+          providerAccount,
+          dateFrom: transactionWindow.dateFrom,
+          dateTo: transactionWindow.dateTo,
+          status: safeError.status,
+          returnedCount: 0,
+          storedCount: 0,
+          skippedCount: 0,
+          reason: transactionFailureReason,
+        });
+        throw error;
+      }
+
+      transactionsReturned += providerTransactions.length;
 
       for (const providerTransaction of providerTransactions) {
         const accountId = accountIdByProviderAccountId.get(providerTransaction.providerAccountId);
 
         if (!accountId) {
+          skippedForAccount += 1;
+          transactionsSkipped += 1;
           continue;
         }
 
@@ -127,7 +229,20 @@ export async function syncBankConnection({
           providerTransactionToTransaction(providerTransaction, accountId),
         );
         transactionsUpserted += 1;
+        storedForAccount += 1;
       }
+
+      logTransactionSyncDiagnostics({
+        connection,
+        providerAccount,
+        dateFrom: transactionWindow.dateFrom,
+        dateTo: transactionWindow.dateTo,
+        status: 200,
+        returnedCount: providerTransactions.length,
+        storedCount: storedForAccount,
+        skippedCount: skippedForAccount,
+        reason: providerTransactions.length === 0 ? "provider_returned_zero_transactions" : null,
+      });
     }
 
     const completedAt = new Date().toISOString();
@@ -140,6 +255,21 @@ export async function syncBankConnection({
       ...connection,
       status: "connected",
       lastSyncedAt: completedAt,
+      lastTransactionSyncedAt: completedAt,
+      lastTransactionSyncStartedAt: startedAt,
+      lastTransactionSyncStatus:
+        transactionsReturned === 0 ? "no_transactions" : "success",
+      lastTransactionSyncMessage:
+        transactionsReturned === 0
+          ? "Provider returned zero transactions for the requested date range."
+          : `${transactionsUpserted} transaction${transactionsUpserted === 1 ? "" : "s"} stored from ${transactionsReturned} returned.`,
+      lastTransactionDateFrom: transactionWindow.dateFrom,
+      lastTransactionDateTo: transactionWindow.dateTo,
+      lastTransactionReturnedCount: transactionsReturned,
+      lastTransactionStoredCount: transactionsUpserted,
+      lastTransactionSkippedCount: transactionsSkipped,
+      lastTransactionFailedEndpoint: null,
+      lastTransactionFailureReason: null,
       errorMessage: null,
       updatedAt: completedAt,
       providerName: derivedProviderName ?? connection.providerName ?? null,
@@ -192,6 +322,13 @@ export async function syncBankConnection({
       status: "sync_failed",
       errorMessage: safeError.userMessage,
       updatedAt: failedAt,
+      lastTransactionSyncStartedAt: startedAt,
+      lastTransactionSyncStatus: "failed",
+      lastTransactionSyncMessage: safeError.userMessage,
+      lastTransactionFailedEndpoint:
+        transactionFailureEndpoint ??
+        (safeReason === "truelayer_transactions_fetch_failed" ? "transactions" : null),
+      lastTransactionFailureReason: transactionFailureReason ?? safeReason ?? null,
       lastFailedSyncAt: failedAt,
       lastFailedEndpoint,
       lastFailedStatus: safeError.status,
