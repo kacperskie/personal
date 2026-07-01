@@ -369,7 +369,7 @@ export function getTrueLayerSandboxReadiness(
       : providerClientCanBeInitialised
         ? `TrueLayer read-only ${config.mode} mode is configured with server-only encrypted token storage.`
         : flags.openBankingEnabled && providerSelected
-          ? "TrueLayer is selected but missing read-only configuration. Mock provider remains available only when explicitly selected."
+          ? `TrueLayer ${config.mode} is selected but missing read-only configuration. Banking calls remain disabled until required server-side settings are present.`
           : "Open Banking is disabled. TrueLayer will not be called until the feature flag and provider are enabled.",
   };
 }

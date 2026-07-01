@@ -56,7 +56,11 @@ const mobileSecondaryItems: NavItem[] = [
   { label: "AI Coach", href: "/ai-coach", icon: Bot },
 ];
 
-function isActivePath(pathname: string, href: string) {
+function isActivePath(pathname: string | null, href: string) {
+  if (!pathname) {
+    return false;
+  }
+
   if (href === "/") {
     return pathname === "/";
   }
@@ -79,11 +83,23 @@ function NotificationBadge({ count }: { count: number }) {
 export function AppShell({
   children,
   unreadNotificationCount = 0,
+  appModeLabel = "Private finance workspace",
+  appModeDescription = "Read-only account data with deterministic finance rules.",
+  appModeTone = "live",
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   unreadNotificationCount?: number;
+  appModeLabel?: string;
+  appModeDescription?: string;
+  appModeTone?: "live" | "mock" | "setup";
 }) {
   const pathname = usePathname();
+  const badgeLabel =
+    appModeTone === "mock"
+      ? "Mock mode"
+      : appModeTone === "setup"
+        ? "Setup needed"
+        : "Live read-only";
 
   return (
     <div className="min-h-dvh bg-paper text-ink lg:grid lg:grid-cols-[280px_minmax(0,1fr)]">
@@ -96,7 +112,7 @@ export function AppShell({
             <span className="block truncate text-sm font-semibold text-ink">
               Personal Finance HQ
             </span>
-            <span className="block text-xs text-ink/55">Private mock workspace</span>
+            <span className="block text-xs text-ink/55">{badgeLabel}</span>
           </span>
         </Link>
 
@@ -130,10 +146,10 @@ export function AppShell({
         <div className="mt-6 hidden rounded-lg border border-line bg-paper p-4 lg:block">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-moss">
             <CalendarClock className="h-4 w-4" aria-hidden="true" />
-            Phase 12C
+            {appModeLabel}
           </div>
           <p className="mt-2 text-sm leading-5 text-ink/65">
-            Firebase Free Mode with mock fallback preserved.
+            {appModeDescription}
           </p>
         </div>
       </aside>
@@ -165,15 +181,24 @@ export function AppShell({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-teal">
-                Direct account connection foundation
+                {appModeLabel}
               </p>
               <p className="mt-1 text-sm text-ink/60">
-                Mock American Express, Nationwide, and Revolut data only.
+                {appModeDescription}
               </p>
             </div>
             <div className="flex w-fit items-center gap-2 rounded-full border border-line bg-white px-3 py-2 text-xs font-semibold text-ink/70">
-              <span className="h-2 w-2 rounded-full bg-moss" aria-hidden="true" />
-              Mock data active
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  appModeTone === "mock"
+                    ? "bg-saffron"
+                    : appModeTone === "setup"
+                      ? "bg-berry"
+                      : "bg-moss"
+                }`}
+                aria-hidden="true"
+              />
+              {badgeLabel}
             </div>
           </div>
 

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { createProviderNotification } from "@/lib/bank-providers/provider-notifications";
 import { getProviderAdapter } from "@/lib/bank-providers/provider-service";
+import { isLiveTrueLayerMode, isSandboxConnection } from "@/lib/bank-providers/sandbox-data";
 import { syncBankConnection } from "@/lib/bank-providers/sync-workflow";
-import { getProviderToken } from "@/lib/bank-providers/token-store";
+import { getProviderTokenForSync } from "@/lib/bank-providers/token-store";
 import type { BankConnection } from "@/lib/domain";
 import {
   getBankConnections,
@@ -23,10 +24,24 @@ export const runtime = "nodejs";
 
 function isRefreshableConnection(connection: BankConnection) {
   return (
+    connection.status !== "archived" &&
     connection.status !== "disconnected" &&
     connection.consentStatus !== "revoked" &&
-    connection.consentStatus !== "expired"
+    connection.consentStatus !== "expired" &&
+    connection.consentStatus === "active"
   );
+}
+
+function isSyncAllEligibleConnection(connection: BankConnection) {
+  if (!isRefreshableConnection(connection)) {
+    return false;
+  }
+
+  if (!isLiveTrueLayerMode()) {
+    return true;
+  }
+
+  return connection.provider === "truelayer" && !isSandboxConnection(connection);
 }
 
 export async function POST() {
@@ -36,15 +51,26 @@ export async function POST() {
     return unauthenticatedResponse();
   }
 
-  const connections = (await getBankConnections()).filter(isRefreshableConnection);
+  const allConnections = await getBankConnections();
+  const connections = allConnections.filter(isSyncAllEligibleConnection);
   let succeeded = 0;
   let failed = 0;
+  let skipped = allConnections.length - connections.length;
+  let attempted = 0;
 
   for (const connection of connections) {
-    const tokenRecord =
+    const tokenPreflight =
       connection.provider === "mock"
         ? null
-        : await getProviderToken(auth.user.id, connection.id);
+        : await getProviderTokenForSync(auth.user.id, connection.id);
+
+    if (tokenPreflight && !tokenPreflight.ok) {
+      skipped += 1;
+      continue;
+    }
+
+    attempted += 1;
+    const tokenRecord = tokenPreflight?.ok ? tokenPreflight.record : null;
     const result = await syncBankConnection({
       userId: auth.user.id,
       connection,
@@ -91,9 +117,11 @@ export async function POST() {
 
   return NextResponse.json({
     status: failed > 0 ? "partial" : "success",
-    refreshed: connections.length,
+    refreshed: attempted,
+    attempted,
     succeeded,
     failed,
+    skipped,
     message:
       connections.length === 0
         ? "No active connections need refreshing."

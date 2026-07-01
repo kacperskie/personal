@@ -30,6 +30,7 @@ const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warnin
   syncing: "neutral",
   sync_failed: "risk",
   disconnected: "neutral",
+  archived: "neutral",
 };
 
 const purposeOptions = Object.entries(accountPurposeLabels) as [AccountPurpose, string][];

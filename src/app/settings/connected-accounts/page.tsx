@@ -6,6 +6,12 @@ import type { ConnectionLifecycleStatus } from "@/lib/domain";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
 import { getProviderConfiguredState } from "@/lib/bank-providers/provider-config";
 import { getProviderTokenDiagnostics } from "@/lib/bank-providers/token-store";
+import {
+  isLiveTrueLayerMode,
+  partitionAccounts,
+  partitionConnections,
+  partitionTransactions,
+} from "@/lib/bank-providers/sandbox-data";
 import { getFirebaseSessionUser } from "@/lib/firebase/session";
 import {
   getAccounts,
@@ -25,6 +31,7 @@ const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warnin
   syncing: "neutral",
   sync_failed: "risk",
   disconnected: "neutral",
+  archived: "neutral",
 };
 
 const connectionLifecycleStates: ConnectionLifecycleStatus[] = [
@@ -35,6 +42,7 @@ const connectionLifecycleStates: ConnectionLifecycleStatus[] = [
   "syncing",
   "sync_failed",
   "disconnected",
+  "archived",
 ];
 
 function labelStatus(status: string) {
@@ -97,11 +105,22 @@ export default async function ConnectedAccountsPage() {
   );
   const providerState = getProviderConfiguredState();
   const truelayerMode = providerState.truelayerReadiness?.mode ?? "sandbox";
+  const liveMode = isLiveTrueLayerMode();
+  const { live: liveConnections } = partitionConnections(bankConnections);
+  const visibleConnections = liveMode ? liveConnections : bankConnections;
+  const { live: liveAccounts, sandbox: sandboxAccounts } = partitionAccounts(
+    accounts,
+    bankConnections,
+  );
+  const visibleAccounts = liveMode ? liveAccounts : accounts;
+  const sandboxAccountIds = new Set(sandboxAccounts.map((account) => account.id));
+  const { live: liveTransactions } = partitionTransactions(transactions, sandboxAccountIds);
+  const visibleTransactions = liveMode ? liveTransactions : transactions;
   const sandboxCleanupPreview = user
     ? await previewSandboxCleanup(user.uid)
     : { connections: 0, accounts: 0, transactions: 0, providerTokens: 0, syncRuns: 0 };
   const asOfDate = new Date().toISOString().slice(0, 10);
-  const connectionsWithDisplayStatus = bankConnections.map((connection) => ({
+  const connectionsWithDisplayStatus = visibleConnections.map((connection) => ({
     ...connection,
     tokenDiagnostics: tokenDiagnostics[connection.id],
     displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
@@ -111,22 +130,29 @@ export default async function ConnectedAccountsPage() {
       (connection.displayStatus === "connected" || connection.displayStatus === "syncing") &&
       connection.tokenDiagnostics?.syncEligible !== "no",
   ).length;
-  const needsReconsent = connectionsWithDisplayStatus.filter(
-    (connection) => connection.displayStatus === "needs_reconsent",
-  ).length;
   const syncFailed = connectionsWithDisplayStatus.filter(
     (connection) => connection.displayStatus === "sync_failed",
+  ).length;
+  const reconnectRequired = connectionsWithDisplayStatus.filter(
+    (connection) =>
+      connection.displayStatus === "needs_reconsent" ||
+      connection.consentStatus === "revoked" ||
+      connection.tokenDiagnostics?.syncEligible === "no",
   ).length;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Open Banking foundation"
+        eyebrow={liveMode ? "Live bank connections" : "Connected account setup"}
         title="Connected Accounts"
-        description={`Read-only TrueLayer ${truelayerMode} connections with provider-agnostic routes, mock fallback, and server-only encrypted token handling.`}
+        description={
+          liveMode
+            ? "Live TrueLayer read-only connections, encrypted server-side tokens, and per-connection sync controls."
+            : `Read-only TrueLayer ${truelayerMode} connections with provider-agnostic routes and explicit mock/dev fallback.`
+        }
       />
 
-      <section className="grid gap-4 xl:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <CheckCircle2 className="h-5 w-5 text-moss" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Active or syncing</p>
@@ -136,13 +162,23 @@ export default async function ConnectedAccountsPage() {
         </div>
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <CircleDashed className="h-5 w-5 text-saffron" aria-hidden="true" />
-          <p className="mt-4 text-sm text-ink/60">Needs re-consent</p>
-          <p className="mt-1 text-2xl font-semibold text-ink">{needsReconsent}</p>
+          <p className="mt-4 text-sm text-ink/60">Reconnect required</p>
+          <p className="mt-1 text-2xl font-semibold text-ink">{reconnectRequired}</p>
         </div>
         <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
           <CircleAlert className="h-5 w-5 text-berry" aria-hidden="true" />
           <p className="mt-4 text-sm text-ink/60">Sync failed</p>
           <p className="mt-1 text-2xl font-semibold text-ink">{syncFailed}</p>
+        </div>
+        <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <CheckCircle2 className="h-5 w-5 text-moss" aria-hidden="true" />
+          <p className="mt-4 text-sm text-ink/60">Live accounts/cards</p>
+          <p className="mt-1 text-2xl font-semibold text-ink">{visibleAccounts.length}</p>
+        </div>
+        <div className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <CheckCircle2 className="h-5 w-5 text-moss" aria-hidden="true" />
+          <p className="mt-4 text-sm text-ink/60">Live transactions</p>
+          <p className="mt-1 text-2xl font-semibold text-ink">{visibleTransactions.length}</p>
         </div>
       </section>
 

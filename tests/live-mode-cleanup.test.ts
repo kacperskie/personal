@@ -31,6 +31,7 @@ import {
 import {
   canRemoveFailedConnectionAttempt,
   ConnectedAccountsManager,
+  connectionArchivePath,
   connectionDisplayTitle,
   connectionReconnectPath,
   connectionRevokePath,
@@ -38,6 +39,7 @@ import {
   requiresReconnect,
   shortConnectionId,
 } from "../src/components/connected-accounts/connected-accounts-manager";
+import { AppShell } from "../src/components/app-shell";
 import { ProviderSafeError } from "../src/lib/bank-providers/provider-errors";
 import { syncBankConnection } from "../src/lib/bank-providers/sync-workflow";
 
@@ -257,7 +259,10 @@ describe("Connected Accounts live-mode UI hides Moneyhub/mock provider", () => {
     );
 
     expect(html).toContain("TrueLayer live");
+    expect(html).toContain("Live connection capability");
     expect(html).not.toContain("Moneyhub sandbox readiness");
+    expect(html).not.toContain("Provider comparison");
+    expect(html).not.toContain("sandbox credentials");
     expect(html).not.toContain(">Mock provider<");
     expect(html).not.toContain(">Moneyhub sandbox<");
     // No secret values are rendered.
@@ -381,6 +386,26 @@ describe("per-connection live connection identity and cleanup", () => {
     expect(failedAttemptRemovalPath("conn_live_b")).toBe(
       "/api/bank-connections/conn_live_b/failed-attempt",
     );
+    expect(connectionArchivePath("conn_live_c")).toBe(
+      "/api/bank-connections/conn_live_c/archive",
+    );
+  });
+
+  it("renders live app shell copy without mock-active wording", () => {
+    const html = renderToStaticMarkup(
+      createElement(AppShell, {
+        appModeLabel: "Live bank connections",
+        appModeDescription: "TrueLayer read-only data with encrypted server-side tokens.",
+        appModeTone: "live",
+        unreadNotificationCount: 0,
+      },
+      createElement("main", null, "Body")),
+    );
+
+    expect(html).toContain("Live bank connections");
+    expect(html).toContain("Live read-only");
+    expect(html).not.toContain("Mock data active");
+    expect(html).not.toContain("Direct account connection foundation");
   });
 
   it("shows reconnect for revoked connections and disables sync", () => {
@@ -926,6 +951,55 @@ describe("per-connection live connection identity and cleanup", () => {
     expect(response.status).toBe(409);
     expect(payload.reason).toBe("not_removable_failed_attempt");
     expect(deletedConnections).toEqual([]);
+  });
+
+  it("archives one historical connection while keeping linked data untouched", async () => {
+    const archivedUpdates: BankConnection[] = [];
+    const revokedTokens: string[] = [];
+    const historical = connection({
+      id: "conn_old_revolut",
+      mode: "live",
+      providerName: "Revolut",
+      institutionName: "Revolut",
+      status: "disconnected",
+      consentStatus: "revoked",
+      lastSyncedAt: "2026-07-01T09:00:00.000Z",
+    });
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async (id: string) => (id === historical.id ? historical : null),
+      updateBankConnectionStatus: async (updated: BankConnection) => {
+        archivedUpdates.push(updated);
+        return updated;
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      revokeProviderToken: async (_userId: string, connectionId: string) => {
+        revokedTokens.push(connectionId);
+        return { revoked: true, connectionId, revokedAt: "2026-07-01T10:00:00.000Z" };
+      },
+    }));
+
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/archive/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_old_revolut/archive", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: historical.id }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.status).toBe("archived");
+    expect(archivedUpdates).toHaveLength(1);
+    expect(archivedUpdates[0].id).toBe(historical.id);
+    expect(archivedUpdates[0].status).toBe("archived");
+    expect(revokedTokens).toEqual([historical.id]);
   });
 
   it("sync failure on one connection updates only that connection", async () => {

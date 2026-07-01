@@ -206,7 +206,8 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(readiness.configured).toBe(false);
     expect(readiness.missingEnvironment).toContain("TRUELAYER_CLIENT_ID");
     expect(readiness.missingEnvironment).toContain("TRUELAYER_CLIENT_SECRET");
-    expect(readiness.safeMessage).toContain("Mock provider remains available");
+    expect(readiness.safeMessage).toContain("missing read-only configuration");
+    expect(readiness.safeMessage).not.toContain("Mock provider remains available");
   });
 
   it("keeps TrueLayer disabled until Open Banking is explicitly enabled", () => {

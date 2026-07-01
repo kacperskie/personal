@@ -724,6 +724,10 @@ export function getConnectionLifecycleStatus(
   connection: BankConnection,
   asOfDate: string,
 ): ConnectionLifecycleStatus {
+  if (connection.status === "archived") {
+    return "archived";
+  }
+
   if (
     connection.consentStatus === "expired" ||
     (connection.consentExpiresAt && connection.consentExpiresAt < asOfDate)

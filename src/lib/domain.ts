@@ -99,7 +99,8 @@ export type ConnectionLifecycleStatus =
   | "needs_reconsent"
   | "syncing"
   | "sync_failed"
-  | "disconnected";
+  | "disconnected"
+  | "archived";
 
 export type ConsentStatus =
   | "not_started"

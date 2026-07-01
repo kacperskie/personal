@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Cable, RefreshCw, ShieldAlert, Trash2, Unplug } from "lucide-react";
+import { Archive, Cable, RefreshCw, ShieldAlert, Trash2, Unplug } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
 import type { BankConnection, BankProvider, ConnectionLifecycleStatus } from "@/lib/domain";
 import type {
@@ -38,6 +38,7 @@ const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warnin
   syncing: "neutral",
   sync_failed: "risk",
   disconnected: "neutral",
+  archived: "neutral",
 };
 
 const providerOptions: Array<{ value: BankProvider; label: string }> = [
@@ -99,8 +100,7 @@ export function connectionDisplayTitle(
   if (linkedAccountName) {
     return linkedAccountName;
   }
-  const created = connection.consentCompletedAt ?? connection.createdAt;
-  return `TrueLayer ${connectionMode(connection)} connection created ${formatConnectionTimestamp(created)}`;
+  return `TrueLayer ${connectionMode(connection)} connection ${shortConnectionId(connection.id)}`;
 }
 
 const cardAccessReasons = new Set([
@@ -171,19 +171,24 @@ export function failedAttemptRemovalPath(connectionId: string) {
   return `/api/bank-connections/${connectionId}/failed-attempt`;
 }
 
+export function connectionArchivePath(connectionId: string) {
+  return `/api/bank-connections/${connectionId}/archive`;
+}
+
 export function requiresReconnect(
   connection: BankConnection,
   diagnostics?: ProviderTokenDiagnostics,
 ) {
   return (
-    connection.consentStatus === "revoked" ||
-    connection.consentStatus === "expired" ||
-    connection.lastFailureReason === "truelayer_token_rejected" ||
-    diagnostics?.syncEligible === "no" ||
-    diagnostics?.reasonCode === "token_record_missing" ||
-    diagnostics?.reasonCode === "token_decrypt_failed" ||
-    diagnostics?.reasonCode === "token_expired_refresh_missing" ||
-    diagnostics?.reasonCode === "token_refresh_failed"
+    connection.status !== "archived" &&
+    (connection.consentStatus === "revoked" ||
+      connection.consentStatus === "expired" ||
+      connection.lastFailureReason === "truelayer_token_rejected" ||
+      diagnostics?.syncEligible === "no" ||
+      diagnostics?.reasonCode === "token_record_missing" ||
+      diagnostics?.reasonCode === "token_decrypt_failed" ||
+      diagnostics?.reasonCode === "token_expired_refresh_missing" ||
+      diagnostics?.reasonCode === "token_refresh_failed")
   );
 }
 
@@ -252,9 +257,7 @@ export function ConnectedAccountsManager({
     : providerOptions
   ).map((option) => (option.value === "truelayer" ? { ...option, label: truelayerLabel } : option));
   const showMoneyhubReadiness = Boolean(providerState.moneyhubReadiness) && !isTrueLayerProvider;
-  const providerComparison = liveMode
-    ? providerState.providerComparison?.filter((provider) => provider.provider === "truelayer")
-    : providerState.providerComparison;
+  const providerComparison = liveMode ? undefined : providerState.providerComparison;
   // Sandbox connections are only split out of the main list in production live
   // mode; in sandbox/dev mode all connections are shown as before.
   const removableFailedAttempts = liveMode
@@ -266,17 +269,42 @@ export function ConnectedAccountsManager({
         ),
       )
     : [];
-  const mainListConnections = (
+  const visiblePrimaryConnections = (
     liveMode
       ? connectionsWithDisplayStatus.filter((connection) => !isSandboxConnection(connection))
       : connectionsWithDisplayStatus
-  ).filter(
+  );
+  const archivedConnections = visiblePrimaryConnections.filter(
+    (connection) => connection.status === "archived",
+  );
+  const actionableConnections = visiblePrimaryConnections.filter(
     (connection) =>
+      connection.status !== "archived" &&
       !canRemoveFailedConnectionAttempt(
         connection,
         connection.summary,
         connection.tokenDiagnostics,
       ),
+  );
+  const reconnectRequiredConnections = actionableConnections.filter((connection) =>
+    requiresReconnect(connection, connection.tokenDiagnostics),
+  );
+  const activeConnections = actionableConnections.filter(
+    (connection) =>
+      !requiresReconnect(connection, connection.tokenDiagnostics) &&
+      connection.tokenDiagnostics?.syncEligible !== "no" &&
+      (connection.status === "connected" || connection.status === "syncing"),
+  );
+  const syncFailedConnections = actionableConnections.filter(
+    (connection) =>
+      !requiresReconnect(connection, connection.tokenDiagnostics) &&
+      connection.status === "sync_failed",
+  );
+  const otherConnections = actionableConnections.filter(
+    (connection) =>
+      !activeConnections.includes(connection) &&
+      !reconnectRequiredConnections.includes(connection) &&
+      !syncFailedConnections.includes(connection),
   );
   const collapsedSandboxConnections = liveMode
     ? connectionsWithDisplayStatus.filter((connection) => isSandboxConnection(connection))
@@ -292,6 +320,48 @@ export function ConnectedAccountsManager({
   const hasSandboxData =
     cleanup.connections + cleanup.accounts + cleanup.transactions + cleanup.providerTokens + cleanup.syncRuns >
       0 || collapsedSandboxConnections.length > 0;
+  const syncAllEligibleCount = liveMode ? activeConnections.length : actionableConnections.length;
+  const connectionSections = liveMode
+    ? [
+        {
+          id: "active",
+          title: "Active live connections",
+          description: "Connected, consent active, token diagnostics healthy, and safe to sync.",
+          connections: activeConnections,
+          empty: "No active live connections are sync-eligible right now.",
+        },
+        {
+          id: "reconnect",
+          title: "Reconnect required",
+          description: "These records need fresh consent or a usable token before syncing.",
+          connections: reconnectRequiredConnections,
+          empty: "No live connections need reconnecting.",
+        },
+        {
+          id: "failed",
+          title: "Sync failed",
+          description: "Provider-safe failure details are shown on each card.",
+          connections: syncFailedConnections,
+          empty: "No live connections have a current sync failure.",
+        },
+        {
+          id: "other",
+          title: "Other connection records",
+          description: "Non-active records that are not removable failed attempts.",
+          connections: otherConnections,
+          empty: "No other live connection records.",
+        },
+      ]
+    : [
+        {
+          id: "all",
+          title: "Provider connections",
+          description:
+            "Status, consent, manual sync, and disconnect controls use provider-agnostic routes.",
+          connections: actionableConnections,
+          empty: "No provider connections are available yet.",
+        },
+      ];
 
   function cleanupSandboxData() {
     setMessage(null);
@@ -453,6 +523,29 @@ export function ConnectedAccountsManager({
             current.filter((candidate) => candidate !== connection.id),
           ),
         );
+    });
+  }
+
+  function archiveConnection(connection: BankConnection, summary?: ConnectionDisplaySummary) {
+    const confirmed = window.confirm(
+      `Hide this connection record only?\n\n${connectionIdentityForConfirmation(
+        connection,
+        summary,
+      )}\n\nLinked accounts, transactions, account purposes, and budget settings will be kept.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMessage(null);
+    startTransition(() => {
+      void postJson(connectionArchivePath(connection.id))
+        .then((payload) => {
+          setMessage(payload.message ?? "Connection record hidden.");
+          window.location.assign("/settings/connected-accounts");
+        })
+        .catch((error: Error) => setMessage(error.message));
     });
   }
 
@@ -622,11 +715,57 @@ export function ConnectedAccountsManager({
               <p className="mt-1">
                 {providerState.truelayerReadiness.missingEnvironment.length > 0
                   ? providerState.truelayerReadiness.missingEnvironment.join(", ")
-                  : "None required for sandbox client initialisation are missing."}
+                  : `None required for ${providerState.truelayerReadiness.mode} client initialisation are missing.`}
               </p>
             </div>
           </div>
         </section>
+      ) : null}
+
+      {liveMode && providerState.truelayerReadiness ? (
+        <details className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <summary className="cursor-pointer text-lg font-semibold text-ink">
+            Live connection capability
+          </summary>
+          <dl className="mt-4 grid gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Provider</dt>
+              <dd className="mt-1 font-semibold text-ink">TrueLayer live</dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Accounts</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.requiredScopesPresent ? "Enabled" : "Scope missing"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Balances</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.requiredScopesPresent ? "Enabled" : "Scope missing"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Transactions</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.requiredScopesPresent ? "Enabled" : "Scope missing"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Card providers</dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {providerState.truelayerReadiness.cardSupport === "enabled"
+                  ? "Enabled"
+                  : providerState.truelayerReadiness.cardSupport === "enabled_scope_missing"
+                    ? "Scope missing"
+                    : "Disabled"}
+              </dd>
+            </div>
+            <div className="rounded-lg border border-line bg-paper p-3">
+              <dt className="text-ink/50">Payments</dt>
+              <dd className="mt-1 font-semibold text-ink">Disabled</dd>
+            </div>
+          </dl>
+        </details>
       ) : null}
 
       {providerComparison && providerComparison.length > 0 ? (
@@ -701,8 +840,9 @@ export function ConnectedAccountsManager({
               </h2>
             </div>
             <p className="mt-2 text-sm leading-6 text-ink/70">
-              Provider-specific work stays behind the adapter. TrueLayer is the read-only
-              banking data path, and mock remains available for local fallback when selected.
+              {liveMode
+                ? "TrueLayer live is the read-only banking data path. Payments are disabled."
+                : "Provider-specific work stays behind the adapter. Mock remains available for local fallback when selected."}
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {targetInstitutions.map((institution) => (
@@ -710,7 +850,7 @@ export function ConnectedAccountsManager({
                   key={institution}
                   className="rounded-full border border-line bg-paper px-3 py-1 text-xs font-semibold text-ink/70"
                 >
-                  Target test: {institution}
+                  {liveMode ? "Expected: " : "Target test: "}{institution}
                 </span>
               ))}
             </div>
@@ -786,35 +926,59 @@ export function ConnectedAccountsManager({
       <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
         <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-ink">Provider connections</h2>
+            <h2 className="text-lg font-semibold text-ink">
+              {liveMode ? "Live connection operations" : "Provider connections"}
+            </h2>
             <p className="text-sm text-ink/60">
-              Status, consent, manual sync, and disconnect controls use provider-agnostic routes.
+              {liveMode
+                ? "Sync, reconnect, disconnect, archive, and cleanup actions operate on one selected connection at a time."
+                : "Status, consent, manual sync, and disconnect controls use provider-agnostic routes."}
             </p>
           </div>
           <button
             type="button"
             onClick={syncAllConnections}
-            disabled={isPending || isSyncingAll || mainListConnections.length === 0}
+            disabled={isPending || isSyncingAll || syncAllEligibleCount === 0}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
           >
             <RefreshCw className={isSyncingAll ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
             Sync all active
           </button>
         </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          {mainListConnections.length === 0 ? (
-            <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/60">
-              No live provider connections are available yet.
-            </div>
-          ) : null}
-
-          {mainListConnections.map((connection) => (
+        <div className="space-y-5">
+          {connectionSections.map((section) => (
+            <div key={section.id}>
+              <div className="mb-3">
+                <h3 className="font-semibold text-ink">{section.title}</h3>
+                <p className="text-sm text-ink/60">{section.description}</p>
+              </div>
+              {section.connections.length === 0 ? (
+                <div className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/60">
+                  {section.empty}
+                </div>
+              ) : null}
+              <div className="grid gap-4 lg:grid-cols-2">
+          {section.connections.map((connection) => (
             <article key={connection.id} className="rounded-lg border border-line bg-paper p-4">
               {(() => {
                 const isSyncingConnection = syncingConnectionIds.includes(connection.id);
                 const reconnectRequired = requiresReconnect(connection, connection.tokenDiagnostics);
                 const summary = connection.summary;
                 const title = connectionDisplayTitle(connection, summary);
+                const removableFailedAttempt = canRemoveFailedConnectionAttempt(
+                  connection,
+                  summary,
+                  connection.tokenDiagnostics,
+                );
+                const hasHistoricalData =
+                  Boolean(connection.lastSyncedAt) ||
+                  Boolean(summary && (summary.linkedAccountCount > 0 || summary.linkedTransactionCount > 0));
+                const canArchiveConnection =
+                  reconnectRequired &&
+                  hasHistoricalData &&
+                  connection.status !== "archived" &&
+                  connection.status !== "connected" &&
+                  connection.status !== "syncing";
                 const displayLabel = reconnectRequired
                   ? "Reconnect required"
                   : isSyncingConnection
@@ -922,6 +1086,30 @@ export function ConnectedAccountsManager({
                     {connection.lastTransactionSyncedAt
                       ? formatConnectionTimestamp(connection.lastTransactionSyncedAt)
                       : "Never"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink/50">Transaction range</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {connection.lastTransactionDateFrom && connection.lastTransactionDateTo
+                      ? `${connection.lastTransactionDateFrom} to ${connection.lastTransactionDateTo}`
+                      : "Not run"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink/50">Transaction result</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {connection.lastTransactionSyncStatus === "no_transactions"
+                      ? "Provider returned zero"
+                      : connection.lastTransactionSyncStatus ?? "Not run"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink/50">Returned/stored/skipped</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {typeof connection.lastTransactionReturnedCount === "number"
+                      ? `${connection.lastTransactionReturnedCount}/${connection.lastTransactionStoredCount ?? 0}/${connection.lastTransactionSkippedCount ?? 0}`
+                      : "Not run"}
                   </dd>
                 </div>
                 <div>
@@ -1061,11 +1249,36 @@ export function ConnectedAccountsManager({
                   <Unplug className="h-4 w-4" aria-hidden="true" />
                   Disconnect
                 </button>
+                {removableFailedAttempt ? (
+                  <button
+                    type="button"
+                    onClick={() => removeFailedAttempt(connection, summary)}
+                    disabled={isPending}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-berry disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Remove failed attempt
+                  </button>
+                ) : null}
+                {canArchiveConnection ? (
+                  <button
+                    type="button"
+                    onClick={() => archiveConnection(connection, summary)}
+                    disabled={isPending}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50"
+                  >
+                    <Archive className="h-4 w-4" aria-hidden="true" />
+                    Hide connection record
+                  </button>
+                ) : null}
               </div>
                   </>
                 );
               })()}
             </article>
+          ))}
+              </div>
+            </div>
           ))}
         </div>
       </section>
@@ -1115,6 +1328,40 @@ export function ConnectedAccountsManager({
             })}
           </div>
         </section>
+      ) : null}
+
+      {archivedConnections.length > 0 ? (
+        <details className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <summary className="cursor-pointer text-lg font-semibold text-ink">
+            Hidden/archived connection records ({archivedConnections.length})
+          </summary>
+          <div className="mt-4 grid gap-3">
+            {archivedConnections.map((connection) => {
+              const summary = connection.summary;
+
+              return (
+                <div
+                  key={connection.id}
+                  className="rounded-lg border border-line bg-paper p-4 text-sm text-ink/70"
+                >
+                  <p className="font-semibold text-ink">
+                    {connectionDisplayTitle(connection, summary)}
+                  </p>
+                  <p className="mt-1">
+                    Connection {shortConnectionId(connection.id)} - Created{" "}
+                    {formatConnectionTimestamp(connection.createdAt)}
+                  </p>
+                  <p className="mt-1">
+                    Kept history: {summary?.linkedAccountCount ?? 0} account/card
+                    {(summary?.linkedAccountCount ?? 0) === 1 ? "" : "s"},{" "}
+                    {summary?.linkedTransactionCount ?? 0} transaction
+                    {(summary?.linkedTransactionCount ?? 0) === 1 ? "" : "s"}.
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </details>
       ) : null}
 
       {collapsedSandboxConnections.length > 0 ? (
