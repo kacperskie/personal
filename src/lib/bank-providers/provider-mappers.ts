@@ -370,10 +370,100 @@ function transactionKind(amount: number, isOwnAccountTransfer: boolean): Categor
   return amount >= 0 ? "income" : "expense";
 }
 
+export function deterministicProviderCategory(transaction: ProviderTransaction) {
+  const text = [
+    transaction.description,
+    transaction.merchant,
+    transaction.category,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (transaction.isOwnAccountTransfer || text.includes("transfer")) {
+    return "cat_transfers";
+  }
+
+  if (transaction.amount > 0 || text.includes("salary") || text.includes("payroll")) {
+    return "cat_income";
+  }
+
+  if (
+    text.includes("credit card") ||
+    text.includes("loan repayment") ||
+    text.includes("mortgage") ||
+    text.includes("debt")
+  ) {
+    return "cat_debt_payments";
+  }
+
+  if (
+    text.includes("saving") ||
+    text.includes("isa") ||
+    text.includes("pension") ||
+    text.includes("vault")
+  ) {
+    return "cat_savings";
+  }
+
+  if (
+    text.includes("direct debit") ||
+    text.includes("standing order") ||
+    text.includes("subscription") ||
+    text.includes("council tax") ||
+    text.includes("energy") ||
+    text.includes("utility") ||
+    text.includes("insurance") ||
+    text.includes("spotify") ||
+    text.includes("netflix")
+  ) {
+    return "cat_bills_subscriptions";
+  }
+
+  if (
+    text.includes("tesco") ||
+    text.includes("sainsbury") ||
+    text.includes("asda") ||
+    text.includes("morrisons") ||
+    text.includes("aldi") ||
+    text.includes("lidl") ||
+    text.includes("waitrose") ||
+    text.includes("grocery") ||
+    text.includes("supermarket")
+  ) {
+    return "cat_groceries";
+  }
+
+  if (
+    text.includes("train") ||
+    text.includes("rail") ||
+    text.includes("tfl") ||
+    text.includes("uber") ||
+    text.includes("fuel") ||
+    text.includes("petrol") ||
+    text.includes("transport")
+  ) {
+    return "cat_transport";
+  }
+
+  if (
+    text.includes("restaurant") ||
+    text.includes("deliveroo") ||
+    text.includes("just eat") ||
+    text.includes("takeaway") ||
+    text.includes("cafe") ||
+    text.includes("coffee")
+  ) {
+    return "cat_eating_out_takeaway";
+  }
+
+  return "cat_unknown";
+}
+
 export function providerTransactionToTransaction(
   transaction: ProviderTransaction,
   accountId: string,
-  categoryId = "cat_uncategorised",
+  categoryId = deterministicProviderCategory(transaction),
   now = new Date().toISOString(),
 ): Transaction {
   const stableTransactionId = `txn_${transaction.providerConnectionId}_${accountId}_${transaction.providerTransactionId}`.replaceAll(

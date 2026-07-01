@@ -142,7 +142,9 @@ export type Account = {
 
 export type BankConnection = {
   id: string;
+  userId?: string;
   provider: BankProvider;
+  providerUserId?: string | null;
   institutionName: string;
   institutionId: string;
   status: ConnectionLifecycleStatus;
@@ -153,6 +155,44 @@ export type BankConnection = {
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProviderTokenStorageRecord = {
+  id: string;
+  connectionId: string;
+  provider: BankProvider;
+  encryptedTokenPayload: string | null;
+  tokenReference: string;
+  providerUserId: string | null;
+  providerConnectionId: string | null;
+  expiresAt: string | null;
+  accessTokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
+  scopes: string[];
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BankBalance = {
+  id: string;
+  userId: string;
+  accountId: string;
+  connectionId: string;
+  providerAccountId: string;
+  currency: CurrencyCode;
+  currentBalance: number;
+  availableBalance: number | null;
+  overdraftLimit: number | null;
+  lastSyncedAt: string;
+};
+
+export type BankSyncRun = ProviderSyncEvent & {
+  userId?: string;
+  connectionId?: string;
+  accountsFetched?: number;
+  transactionsFetched?: number;
+  errorCode?: string | null;
 };
 
 export type ProviderAccount = {

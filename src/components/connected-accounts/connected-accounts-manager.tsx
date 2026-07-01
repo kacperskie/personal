@@ -246,9 +246,9 @@ export function ConnectedAccountsManager({
               </dd>
             </div>
             <div className="rounded-lg border border-line bg-paper p-3">
-              <dt className="text-ink/50">Webhook secret</dt>
+              <dt className="text-ink/50">Token encryption</dt>
               <dd className="mt-1 font-semibold text-ink">
-                {providerState.truelayerReadiness.webhookSecretConfigured
+                {providerState.truelayerReadiness.tokenEncryptionConfigured
                   ? "Configured"
                   : "Missing"}
               </dd>
@@ -257,7 +257,7 @@ export function ConnectedAccountsManager({
               <dt className="text-ink/50">Token store</dt>
               <dd className="mt-1 font-semibold text-ink">
                 {providerState.truelayerReadiness.tokenStoreAvailable
-                  ? "Server-only stub"
+                  ? "Encrypted server-side"
                   : "Unavailable"}
               </dd>
             </div>
@@ -351,9 +351,8 @@ export function ConnectedAccountsManager({
               <h2 className="text-lg font-semibold text-ink">Start sandbox connection</h2>
             </div>
             <p className="mt-2 text-sm leading-6 text-ink/70">
-              Provider-specific work stays behind the adapter. Moneyhub is the first
-              sandbox proof of concept, TrueLayer is available for comparison, and mock
-              remains available for local fallback.
+              Provider-specific work stays behind the adapter. TrueLayer is the read-only
+              banking data path, and mock remains available for local fallback when selected.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {targetInstitutions.map((institution) => (

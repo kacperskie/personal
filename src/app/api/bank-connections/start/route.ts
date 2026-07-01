@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { BankProvider } from "@/lib/domain";
+import { getOpenBankingProvider } from "@/lib/bank-providers/provider-config";
 import { getProviderAdapter } from "@/lib/bank-providers/provider-service";
 import { createSafeErrorPayload, toProviderSafeError } from "@/lib/bank-providers/provider-errors";
 import { createProviderNotification } from "@/lib/bank-providers/provider-notifications";
@@ -25,9 +26,16 @@ export async function POST(request: Request) {
     const body = contentType.includes("application/json")
       ? await request.json()
       : Object.fromEntries((await request.formData()).entries());
-    const providerName = String(body.provider ?? "moneyhub") as BankProvider;
-    const institutionId = String(body.institutionId ?? "moneyhub_sandbox");
-    const institutionName = String(body.institutionName ?? "Moneyhub sandbox");
+    const configuredProvider = getOpenBankingProvider();
+    const providerName = String(body.provider ?? configuredProvider) as BankProvider;
+    const institutionId = String(
+      body.institutionId ??
+        (providerName === "truelayer" ? "truelayer_sandbox" : "moneyhub_sandbox"),
+    );
+    const institutionName = String(
+      body.institutionName ??
+        (providerName === "truelayer" ? "TrueLayer sandbox" : "Moneyhub sandbox"),
+    );
     const provider = getProviderAdapter(providerName);
     const start = await provider.createConnection({
       userId: auth.user.id,

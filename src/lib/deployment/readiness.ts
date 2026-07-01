@@ -212,9 +212,11 @@ export function buildSystemReadinessReport(
         ? "pass"
         : "fail",
       selectedProvider === "mock"
-        ? "Mock provider selected; no banking APIs are called."
+        ? flags.openBankingEnabled
+          ? "Open Banking is enabled but mock provider is selected; no real banking APIs are called."
+          : "Open Banking is disabled; no banking APIs are called."
         : selectedProviderConfigured
-          ? `${selectedProvider} sandbox configuration appears present.`
+          ? `${selectedProvider} read-only configuration appears present.`
           : `${selectedProvider} sandbox is selected but not fully configured.`,
       selectedProviderConfigured
         ? null
@@ -222,27 +224,27 @@ export function buildSystemReadinessReport(
     ),
     check(
       "truelayer",
-      "TrueLayer sandbox",
-      trueLayerSelected
+      "TrueLayer read-only data",
+      trueLayerSelected && flags.openBankingEnabled
         ? statusFromConfigured(validation.serverOnly.truelayerSandboxConfigured)
         : "pass",
       validation.serverOnly.truelayerSandboxConfigured
-        ? "Sandbox configuration appears present."
-        : "Not fully configured; mock provider fallback remains available.",
-      trueLayerSelected
-        ? "Set TrueLayer sandbox client, redirect, scope, and webhook configuration."
+        ? `Open Banking ${flags.openBankingEnabled ? "enabled" : "disabled"}; TrueLayer ${truelayerReadiness.sandboxModeEnabled ? "sandbox" : "live"} mode; client ID present; client secret present; redirect URI present; required scopes present; token encryption present.`
+        : trueLayerSelected
+          ? `Open Banking ${flags.openBankingEnabled ? "enabled" : "disabled"}; TrueLayer ${truelayerReadiness.sandboxModeEnabled ? "sandbox" : "live"} mode; missing: ${truelayerReadiness.missingEnvironment.join(", ") || "configuration not active"}.`
+          : "TrueLayer not selected; no TrueLayer API calls are made.",
+      trueLayerSelected && flags.openBankingEnabled
+        ? "Set TrueLayer client ID, client secret, redirect URI, scopes, and TOKEN_ENCRYPTION_KEY server-side."
         : null,
     ),
     check(
       "truelayer_webhook",
       "TrueLayer webhook secret",
-      trueLayerSelected
-        ? statusFromConfigured(truelayerReadiness.webhookSecretConfigured)
-        : "pass",
+      trueLayerSelected ? statusFromConfigured(truelayerReadiness.webhookSecretConfigured, true) : "pass",
       truelayerReadiness.webhookSecretConfigured
         ? "Configured server-side for sandbox webhook validation."
-        : "Missing; TrueLayer webhook route rejects non-stub signatures.",
-      trueLayerSelected ? "Set the TrueLayer webhook secret server-side." : null,
+        : "Missing; read-only manual sync still works, and the TrueLayer webhook route rejects non-stub signatures.",
+      trueLayerSelected ? "Set the TrueLayer webhook secret only before enabling webhooks." : null,
     ),
     check(
       "web_push",
@@ -353,6 +355,7 @@ export function assertNoSecretValuesInReadinessReport(report: SystemReadinessRep
     process.env.MONEYHUB_CLIENT_SECRET,
     process.env.TRUELAYER_CLIENT_SECRET,
     process.env.TRUELAYER_WEBHOOK_SECRET,
+    process.env.TOKEN_ENCRYPTION_KEY,
     process.env.FIREBASE_PRIVATE_KEY,
     process.env.FIREBASE_CLIENT_EMAIL,
     process.env.WEB_PUSH_VAPID_PRIVATE_KEY,

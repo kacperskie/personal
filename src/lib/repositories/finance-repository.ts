@@ -478,7 +478,7 @@ export async function deleteManualFinanceItem(id: string): Promise<{ id: string 
 
 export async function getBankConnections(): Promise<BankConnection[]> {
   if (isFirebaseBackend()) {
-    return getFirebaseCollection("bankConnections", mockBankConnections);
+    return getFirebaseCollection("bankConnections", []);
   }
 
   const context = await getAuthenticatedContext();
@@ -570,11 +570,7 @@ export async function upsertBankConnection(
 
 export async function getBankConnectionById(id: string): Promise<BankConnection | null> {
   if (isFirebaseBackend()) {
-    return (
-      (await getFirebaseDocument("bankConnections", id)) ??
-      mockBankConnections.find((connection) => connection.id === id) ??
-      null
-    );
+    return getFirebaseDocument("bankConnections", id);
   }
 
   const context = await getAuthenticatedContext();

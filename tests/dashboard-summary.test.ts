@@ -9,6 +9,7 @@ import type { FirebaseAuthenticatedContext } from "../src/lib/repositories/fireb
 import {
   dashboardSummary as mockDashboardSummary,
   mockAccounts,
+  mockBankConnections,
   mockBills,
   mockBudgetPeriods,
   mockBudgets,
@@ -160,6 +161,11 @@ function liveData(userId = "user_live"): DashboardSummaryData {
       },
     ],
     categories: mockCategories.map((category) => ({ ...category, userId })),
+    bankConnections: mockBankConnections.slice(0, 1).map((connection) => ({
+      ...connection,
+      userId,
+      status: "connected" as const,
+    })),
   };
 }
 
@@ -179,6 +185,7 @@ function emptyData(userId = "user_empty"): DashboardSummaryData {
     budgets: [],
     budgetPeriods: [],
     categories: [],
+    bankConnections: [],
   };
 }
 
@@ -200,7 +207,7 @@ describe("dashboard summary", () => {
   it("shows an empty state for signed-in Firebase users with no finance data", () => {
     const model = buildFirebaseDashboardModel(emptyData(), "2026-07-01");
 
-    expect(model).toEqual({ kind: "empty", source: "firebase" });
+    expect(model).toEqual({ kind: "empty", source: "firebase", reason: "connect_bank" });
   });
 
   it("keeps BACKEND_PROVIDER=mock on the seeded mock dashboard", async () => {
@@ -257,6 +264,7 @@ describe("dashboard summary", () => {
       budgets: [],
       budgetPeriods: [],
       categories: [],
+      bankConnections: [],
     };
     const db = {
       collection(path: string) {

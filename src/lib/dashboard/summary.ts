@@ -2,6 +2,7 @@ import "server-only";
 
 import type {
   Account,
+  BankConnection,
   Bill,
   BillsAccountSummary,
   Budget,
@@ -117,6 +118,7 @@ export type DashboardSummaryData = {
   budgets: Budget[];
   budgetPeriods: BudgetPeriod[];
   categories: Category[];
+  bankConnections: BankConnection[];
 };
 
 export type DashboardSource = "firebase" | "mock" | "firebase_fallback";
@@ -137,13 +139,16 @@ export type DashboardReadyModel = {
     manualFinanceItems: number;
     paydayPlans: number;
     overdraftPlans: number;
+    bankConnections: number;
   };
+  warnings: string[];
   fallbackReason: string | null;
 };
 
 export type DashboardEmptyModel = {
   kind: "empty";
   source: "firebase";
+  reason: "connect_bank" | "sync_bank" | "add_finance_data";
 };
 
 export type DashboardErrorModel = {
@@ -253,6 +258,16 @@ function userDataPresent(data: DashboardSummaryData) {
     data.paydayPlans.length > 0 ||
     data.overdraftPlans.length > 0
   );
+}
+
+function dashboardWarnings(data: DashboardSummaryData) {
+  return data.bankConnections
+    .filter((connection) => connection.status === "sync_failed")
+    .map((connection) =>
+      connection.errorMessage
+        ? `${connection.institutionName} sync failed: ${connection.errorMessage}`
+        : `${connection.institutionName} sync failed. Last known data is still shown.`,
+    );
 }
 
 function nextDebtDue(
@@ -469,7 +484,9 @@ export function buildDashboardSummaryFromData(
       manualFinanceItems: data.manualFinanceItems.length,
       paydayPlans: data.paydayPlans.length,
       overdraftPlans: data.overdraftPlans.length,
+      bankConnections: data.bankConnections.length,
     },
+    warnings: dashboardWarnings(data),
   };
 }
 
@@ -489,6 +506,7 @@ function mockData(): DashboardSummaryData {
     budgets: mockBudgets,
     budgetPeriods: mockBudgetPeriods,
     categories: mockCategories,
+    bankConnections: [],
   };
 }
 
@@ -506,6 +524,7 @@ function buildMockDashboardModel(source: "mock" | "firebase_fallback", reason: s
     budgetHealth: mockBudgetHealth,
     upcomingBills: mockUpcomingBills,
     dataCounts: computed.dataCounts,
+    warnings: [],
     fallbackReason: reason,
   } satisfies DashboardReadyModel;
 }
@@ -526,6 +545,7 @@ export async function readFirebaseDashboardDataForContext(
     budgets,
     budgetPeriods,
     categories,
+    bankConnections,
   ] = await Promise.all([
     getFirebaseCollectionForContext(context, "accounts"),
     getFirebaseCollectionForContext(context, "bills"),
@@ -539,6 +559,7 @@ export async function readFirebaseDashboardDataForContext(
     getFirebaseCollectionForContext(context, "budgets"),
     getFirebaseCollectionForContext(context, "budgetPeriods"),
     getFirebaseCollectionForContext(context, "categories"),
+    getFirebaseCollectionForContext(context, "bankConnections"),
   ]);
   const userSnapshot = await context.db.doc(`users/${context.userId}`).get();
   const profile = userSnapshot.exists
@@ -560,6 +581,9 @@ export async function readFirebaseDashboardDataForContext(
     budgets: budgets.filter((record) => isCurrentUserRecord(record, context.userId)),
     budgetPeriods: budgetPeriods.filter((record) => isCurrentUserRecord(record, context.userId)),
     categories: categories.filter((record) => isCurrentUserRecord(record, context.userId)),
+    bankConnections: bankConnections.filter((record) =>
+      isCurrentUserRecord(record, context.userId),
+    ),
   };
 }
 
@@ -578,7 +602,11 @@ export function buildFirebaseDashboardModel(
   asOfDate = isoToday(),
 ): DashboardReadyModel | DashboardEmptyModel {
   if (!userDataPresent(data)) {
-    return { kind: "empty", source: "firebase" };
+    return {
+      kind: "empty",
+      source: "firebase",
+      reason: data.bankConnections.length > 0 ? "sync_bank" : "connect_bank",
+    };
   }
 
   return {

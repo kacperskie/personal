@@ -153,7 +153,7 @@ describe("phase 6 Open Banking sandbox foundation", () => {
     expect(safe).toEqual({
       connectionId: "conn_test",
       provider: "moneyhub",
-      tokenReference: "token-ref:moneyhub:conn_test",
+      tokenStored: true,
       providerUserId: null,
       providerConnectionId: null,
       expiresAt: "2026-09-30T09:00:00.000Z",

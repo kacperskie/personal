@@ -1,5 +1,7 @@
 import type { BankProvider } from "@/lib/domain";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { getFeatureFlags } from "@/lib/deployment/env";
+import { isProviderTokenStoreAvailable } from "@/lib/bank-providers/token-store";
 
 export type MoneyhubProviderConfig = {
   provider: "moneyhub";
@@ -36,6 +38,7 @@ export type MoneyhubSandboxReadiness = {
 
 export type TrueLayerProviderConfig = {
   provider: "truelayer";
+  openBankingEnabled: boolean;
   clientId: string | null;
   clientSecret: string | null;
   redirectUri: string | null;
@@ -60,6 +63,8 @@ export type TrueLayerSandboxReadiness = {
   }>;
   missingEnvironment: string[];
   webhookSecretConfigured: boolean;
+  requiredScopesPresent: boolean;
+  tokenEncryptionConfigured: boolean;
   tokenStoreAvailable: boolean;
   supabaseConfigured: boolean;
   providerClientCanBeInitialised: boolean;
@@ -143,7 +148,7 @@ export function getTrueLayerProviderConfig(
   const clientSecret = env.TRUELAYER_CLIENT_SECRET || null;
   const redirectUri =
     env.TRUELAYER_REDIRECT_URI ||
-    "http://localhost:3000/api/bank-connections/callback?provider=truelayer";
+    "http://localhost:3000/api/bank-connections/callback";
   const webhookSecret = env.TRUELAYER_WEBHOOK_SECRET || null;
   const apiBaseUrl =
     env.TRUELAYER_API_BASE_URL || "https://api.truelayer-sandbox.com";
@@ -157,9 +162,12 @@ export function getTrueLayerProviderConfig(
     env.OPEN_BANKING_PROVIDER === "truelayer" ||
     apiBaseUrl.toLowerCase().includes("sandbox") ||
     authBaseUrl.toLowerCase().includes("sandbox");
+  const openBankingEnabled =
+    env.OPEN_BANKING_ENABLED === "true" && env.OPEN_BANKING_PROVIDER === "truelayer";
 
   return {
     provider: "truelayer",
+    openBankingEnabled,
     clientId,
     clientSecret,
     redirectUri,
@@ -167,7 +175,7 @@ export function getTrueLayerProviderConfig(
     apiBaseUrl,
     authBaseUrl,
     scopes,
-    configured: Boolean(clientId && clientSecret && redirectUri),
+    configured: Boolean(openBankingEnabled && clientId && clientSecret && redirectUri),
     sandboxMode,
   };
 }
@@ -236,10 +244,21 @@ export function getTrueLayerSandboxReadiness(
 ): TrueLayerSandboxReadiness {
   const provider = getOpenBankingProvider(env);
   const config = getTrueLayerProviderConfig(env);
+  const flags = getFeatureFlags(env);
+  const requiredScopes = ["info", "accounts", "balance", "transactions"];
+  const requiredScopesPresent = requiredScopes.every((scope) => config.scopes.includes(scope));
+  const tokenEncryptionConfigured = isProviderTokenStoreAvailable(env);
+  const providerSelected = provider === "truelayer";
+  const openBankingActive = flags.openBankingEnabled && providerSelected;
   const requiredEnvironment = [
     {
+      name: "OPEN_BANKING_ENABLED",
+      present: flags.openBankingEnabled,
+      sensitive: false,
+    },
+    {
       name: "OPEN_BANKING_PROVIDER",
-      present: provider === "truelayer",
+      present: providerSelected,
       sensitive: false,
     },
     {
@@ -268,23 +287,28 @@ export function getTrueLayerSandboxReadiness(
       sensitive: false,
     },
     {
-      name: "TRUELAYER_WEBHOOK_SECRET",
-      present: Boolean(config.webhookSecret),
-      sensitive: true,
+      name: "TRUELAYER_SCOPES",
+      present: config.scopes.length > 0 && requiredScopesPresent,
+      sensitive: false,
     },
     {
-      name: "TRUELAYER_SCOPES",
-      present: config.scopes.length > 0,
-      sensitive: false,
+      name: "TOKEN_ENCRYPTION_KEY",
+      present: tokenEncryptionConfigured,
+      sensitive: true,
     },
   ];
   const missingEnvironment = requiredEnvironment
-    .filter((item) => !item.present)
+    .filter((item) => openBankingActive && !item.present)
     .map((item) => item.name);
-  const providerClientCanBeInitialised = config.configured && config.sandboxMode;
+  const providerClientCanBeInitialised =
+    providerSelected &&
+    config.configured &&
+    config.sandboxMode &&
+    requiredScopesPresent &&
+    tokenEncryptionConfigured;
 
   return {
-    providerSelected: provider === "truelayer",
+    providerSelected,
     provider,
     configured: config.configured,
     sandboxModeEnabled: config.sandboxMode,
@@ -292,12 +316,16 @@ export function getTrueLayerSandboxReadiness(
     requiredEnvironment,
     missingEnvironment,
     webhookSecretConfigured: Boolean(config.webhookSecret),
-    tokenStoreAvailable: true,
+    requiredScopesPresent,
+    tokenEncryptionConfigured,
+    tokenStoreAvailable: tokenEncryptionConfigured,
     supabaseConfigured: isSupabaseConfigured(),
     providerClientCanBeInitialised,
     safeMessage: providerClientCanBeInitialised
-      ? "TrueLayer sandbox appears configured. Capability still needs sandbox validation."
-      : "TrueLayer sandbox is not fully configured. Mock provider remains available.",
+      ? "TrueLayer read-only sandbox is configured with server-only encrypted token storage."
+      : flags.openBankingEnabled && providerSelected
+        ? "TrueLayer is selected but missing read-only configuration. Mock provider remains available only when explicitly selected."
+        : "Open Banking is disabled. TrueLayer will not be called until the feature flag and provider are enabled.",
   };
 }
 

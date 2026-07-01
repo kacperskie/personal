@@ -44,26 +44,45 @@ export default async function DashboardPage() {
   const dashboard = await getDashboardViewModel();
 
   if (dashboard.kind === "empty") {
+    const emptyCopy =
+      dashboard.reason === "sync_bank"
+        ? {
+            title: "Sync your connected bank account",
+            description:
+              "A bank connection exists, but no account or transaction data has been synced yet.",
+            body:
+              "Run a manual sync from Connected Accounts. The dashboard will then calculate safe to spend from your user-owned bank records.",
+            primaryHref: "/settings/connected-accounts",
+            primaryLabel: "Sync connected account",
+          }
+        : {
+            title: "Connect your bank account",
+            description:
+              "No finance data is available for your signed-in Firebase account yet.",
+            body:
+              "The dashboard is intentionally not showing seeded mock totals in Firebase mode. Connect a read-only bank account first, then the deterministic finance engine will calculate safe to spend, bills funding, overdraft position, and debt progress from your data.",
+            primaryHref: "/settings/connected-accounts",
+            primaryLabel: "Connect bank account",
+          };
+
     return (
       <div className="space-y-6">
         <PageHeader
           eyebrow="Empty dashboard"
           title="Dashboard"
-          description="No finance data is available for your signed-in Firebase account yet. Add accounts, bills, debts, savings goals, or manual entries to calculate a real safe-to-spend number."
+          description={emptyCopy.description}
         />
         <section className="rounded-lg border border-line bg-white p-6 shadow-panel">
-          <h2 className="text-lg font-semibold text-ink">Set up your first real numbers</h2>
+          <h2 className="text-lg font-semibold text-ink">{emptyCopy.title}</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/65">
-            The dashboard is intentionally not showing seeded mock totals in Firebase mode. Add
-            user-owned records first, then the deterministic finance engine will calculate safe to
-            spend, bills funding, overdraft position, and debt progress from your data.
+            {emptyCopy.body}
           </p>
           <div className="mt-5 flex flex-wrap gap-3">
             <a
-              href="/accounts"
+              href={emptyCopy.primaryHref}
               className="inline-flex min-h-10 items-center rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
             >
-              Add accounts
+              {emptyCopy.primaryLabel}
             </a>
             <a
               href="/manual-entries"
@@ -128,6 +147,19 @@ export default async function DashboardPage() {
             <p className="text-sm leading-6 text-ink/75">
               {dashboard.fallbackReason} These numbers are not from your signed-in Firebase data.
             </p>
+          </div>
+        </section>
+      ) : null}
+
+      {dashboard.warnings.length > 0 ? (
+        <section className="rounded-lg border border-saffron/30 bg-saffron/10 p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-saffron" aria-hidden="true" />
+            <div className="space-y-1 text-sm leading-6 text-ink/75">
+              {dashboard.warnings.map((warning) => (
+                <p key={warning}>{warning} Last known data is still shown.</p>
+              ))}
+            </div>
           </div>
         </section>
       ) : null}

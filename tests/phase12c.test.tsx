@@ -68,7 +68,10 @@ describe("phase 12C Firebase Free Mode", () => {
 
     expect(rules).toContain("request.auth.uid == userId");
     expect(rules).toContain("users/{userId}");
+    expect(rules).toContain("match /providerTokens/{connectionId}");
+    expect(rules).toContain("allow read, create, update, delete: if false");
     expect(schema).toContain("users/{userId}/accounts/{accountId}");
+    expect(schema).toContain("users/{userId}/providerTokens/{connectionId}");
     expect(schema).toContain("BACKEND_PROVIDER=firebase");
   });
 

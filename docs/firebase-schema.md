@@ -46,6 +46,7 @@ users/{userId}/manualFinanceItems/{itemId}
 users/{userId}/merchantRules/{ruleId}
 users/{userId}/notificationDeliveryAttempts/{attemptId}
 users/{userId}/notificationPreferences/{preferenceId}
+users/{userId}/providerTokens/{connectionId}
 users/{userId}/providerSyncEvents/{eventId}
 users/{userId}/pushSubscriptions/{subscriptionId}
 users/{userId}/recurringPaymentCandidates/{candidateId}
@@ -63,9 +64,34 @@ Firestore documents use the existing TypeScript domain field names, for example 
 
 Rules live in `firebase/firestore.rules`.
 
-Each authenticated user can read and write only `users/{auth.uid}` and nested collections below that document. All other reads and writes are denied by default.
+Each authenticated user can read and write only `users/{auth.uid}` and client-safe nested collections below that document. `providerTokens` is denied to browser clients and written only through Firebase Admin. All other reads and writes are denied by default.
+
+Provider token records store encrypted Open Banking token payloads only. They are written
+server-side under `users/{userId}/providerTokens/{connectionId}` and require
+`TOKEN_ENCRYPTION_KEY` when TrueLayer is enabled. Do not display encrypted token
+payloads, token references, provider account numbers, or raw provider payloads in UI or logs.
 
 Push subscription records are sensitive and must not be displayed in UI or logs.
+
+## TrueLayer Read-Only Foundation
+
+Set these only for sandbox testing:
+
+- `OPEN_BANKING_ENABLED=true`
+- `OPEN_BANKING_PROVIDER=truelayer`
+- `TRUELAYER_SANDBOX_ENABLED=true`
+- `TRUELAYER_CLIENT_ID`
+- `TRUELAYER_CLIENT_SECRET`
+- `TRUELAYER_REDIRECT_URI=https://your-site.netlify.app/api/bank-connections/callback`
+- `TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com`
+- `TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com`
+- `TRUELAYER_SCOPES=info accounts balance transactions cards offline_access`
+- `TOKEN_ENCRYPTION_KEY` with at least 32 characters
+
+This foundation is read-only. It can start consent, handle the callback, store
+encrypted tokens server-side, sync accounts, balances, and transactions, then
+drive dashboard calculations from those records. Payments, bank transfers, AI
+coach behaviour, and webhook-driven sync remain disabled/delayed.
 
 ## Spreadsheet Tracker Onboarding
 

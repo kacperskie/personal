@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { BankProvider } from "@/lib/domain";
 import { createProviderNotification } from "@/lib/bank-providers/provider-notifications";
 import { createSafeErrorPayload, toProviderSafeError } from "@/lib/bank-providers/provider-errors";
+import { getOpenBankingProvider } from "@/lib/bank-providers/provider-config";
 import { getProviderAdapter } from "@/lib/bank-providers/provider-service";
 import { recordAuditEvent, upsertBankConnection } from "@/lib/repositories/finance-repository";
 import { createNotification } from "@/lib/repositories/notification-repository";
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const providerName = (url.searchParams.get("provider") ?? "moneyhub") as BankProvider;
+  const providerName = (url.searchParams.get("provider") ?? getOpenBankingProvider()) as BankProvider;
 
   try {
     const provider = getProviderAdapter(providerName);

@@ -21,15 +21,20 @@ import {
   type TrueLayerClientLike,
 } from "../src/lib/bank-providers/truelayer-provider";
 import {
+  deterministicProviderCategory,
+  providerTransactionToTransaction,
+} from "../src/lib/bank-providers/provider-mappers";
+import {
   getProviderToken,
   toClientSafeTokenRecord,
 } from "../src/lib/bank-providers/token-store";
 
 const configuredTrueLayer: TrueLayerProviderConfig = {
   provider: "truelayer",
+  openBankingEnabled: true,
   clientId: "truelayer-client",
   clientSecret: "truelayer-secret",
-  redirectUri: "http://localhost:3000/api/bank-connections/callback?provider=truelayer",
+  redirectUri: "http://localhost:3000/api/bank-connections/callback",
   webhookSecret: "truelayer-webhook-secret",
   apiBaseUrl: "https://api.truelayer-sandbox.com",
   authBaseUrl: "https://auth.truelayer-sandbox.com",
@@ -56,6 +61,8 @@ const baseConnection: BankConnection = {
 function truelayerClient(overrides: Partial<TrueLayerClientLike> = {}): TrueLayerClientLike {
   return {
     exchangeCodeForTokens: vi.fn(async () => ({
+      access_token: "tl-access-token",
+      refresh_token: "tl-refresh-token",
       expires_in: 3600,
       sub: "tl_user_001",
     })),
@@ -144,23 +151,25 @@ afterEach(() => {
 describe("phase 12A TrueLayer provider comparison", () => {
   it("reports TrueLayer readiness without exposing secret values", () => {
     vi.stubEnv("OPEN_BANKING_PROVIDER", "truelayer");
+    vi.stubEnv("OPEN_BANKING_ENABLED", "true");
     vi.stubEnv("TRUELAYER_CLIENT_ID", "client-id");
     vi.stubEnv("TRUELAYER_CLIENT_SECRET", "secret-value");
     vi.stubEnv("TRUELAYER_REDIRECT_URI", configuredTrueLayer.redirectUri!);
-    vi.stubEnv("TRUELAYER_WEBHOOK_SECRET", "webhook-secret-value");
+    vi.stubEnv("TOKEN_ENCRYPTION_KEY", "x".repeat(32));
 
     const readiness = getTrueLayerSandboxReadiness();
     const serialised = JSON.stringify(readiness);
 
     expect(readiness.providerSelected).toBe(true);
     expect(readiness.configured).toBe(true);
-    expect(readiness.redirectUri).toContain("provider=truelayer");
+    expect(readiness.redirectUri).toContain("/api/bank-connections/callback");
     expect(serialised).not.toContain("secret-value");
-    expect(serialised).not.toContain("webhook-secret-value");
+    expect(serialised).not.toContain("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx");
   });
 
   it("returns safe missing TrueLayer environment output", () => {
     vi.stubEnv("OPEN_BANKING_PROVIDER", "truelayer");
+    vi.stubEnv("OPEN_BANKING_ENABLED", "true");
     vi.stubEnv("TRUELAYER_CLIENT_ID", "");
     vi.stubEnv("TRUELAYER_CLIENT_SECRET", "");
 
@@ -170,6 +179,20 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(readiness.missingEnvironment).toContain("TRUELAYER_CLIENT_ID");
     expect(readiness.missingEnvironment).toContain("TRUELAYER_CLIENT_SECRET");
     expect(readiness.safeMessage).toContain("Mock provider remains available");
+  });
+
+  it("keeps TrueLayer disabled until Open Banking is explicitly enabled", () => {
+    vi.stubEnv("OPEN_BANKING_PROVIDER", "truelayer");
+    vi.stubEnv("TRUELAYER_CLIENT_ID", "client-id");
+    vi.stubEnv("TRUELAYER_CLIENT_SECRET", "secret-value");
+    vi.stubEnv("TRUELAYER_REDIRECT_URI", configuredTrueLayer.redirectUri!);
+    vi.stubEnv("TOKEN_ENCRYPTION_KEY", "x".repeat(32));
+
+    const readiness = getTrueLayerSandboxReadiness();
+
+    expect(readiness.configured).toBe(false);
+    expect(readiness.providerClientCanBeInitialised).toBe(false);
+    expect(readiness.safeMessage).toContain("Open Banking is disabled");
   });
 
   it("selects mock, Moneyhub, and TrueLayer provider adapters", () => {
@@ -225,7 +248,61 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(mapped.pending).toBe(true);
   });
 
+  it("builds the TrueLayer auth URL from configured scopes and redirect URI", async () => {
+    const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
+    const start = await provider.createConnection({
+      userId: "user_test",
+      institutionId: "truelayer_sandbox",
+      institutionName: "TrueLayer sandbox",
+    });
+    const url = new URL(start.authorizationUrl ?? "");
+
+    expect(url.searchParams.get("redirect_uri")).toBe(configuredTrueLayer.redirectUri);
+    expect(url.searchParams.get("scope")).toBe(configuredTrueLayer.scopes.join(" "));
+    expect(url.searchParams.get("client_id")).toBe(configuredTrueLayer.clientId);
+    expect(url.searchParams.get("state")).toBe(start.state);
+  });
+
+  it("rejects invalid TrueLayer callback state", async () => {
+    const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
+
+    await expect(
+      provider.handleCallback({
+        code: "sandbox-code",
+        state: "invalid-state",
+        userId: "user_test",
+      }),
+    ).rejects.toMatchObject({
+      code: "provider_callback_failed",
+    });
+  });
+
+  it("maps simple deterministic categories without AI", () => {
+    const providerTransaction = {
+      id: "ptxn_tesco",
+      providerConnectionId: "conn_truelayer_test",
+      providerAccountId: "tl_account_current",
+      providerTransactionId: "tl_txn_tesco",
+      date: "2026-06-30",
+      providerUpdatedAt: null,
+      providerStatus: "posted" as const,
+      merchant: "Tesco",
+      description: "TESCO STORES",
+      amount: -32.45,
+      currency: "GBP" as const,
+      pending: false,
+      category: "PURCHASE",
+      isOwnAccountTransfer: false,
+    };
+
+    expect(deterministicProviderCategory(providerTransaction)).toBe("cat_groceries");
+    expect(providerTransactionToTransaction(providerTransaction, "acct_current").categoryId).toBe(
+      "cat_groceries",
+    );
+  });
+
   it("handles TrueLayer callback state and stores safe token metadata", async () => {
+    vi.stubEnv("TOKEN_ENCRYPTION_KEY", "x".repeat(32));
     const provider = new TrueLayerProvider(configuredTrueLayer, async () => truelayerClient());
     const start = await provider.createConnection({
       userId: "user_test",
@@ -243,8 +320,11 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(callback.connection.provider).toBe("truelayer");
     expect(callback.connection.status).toBe("connected");
     expect(token?.providerUserId).toBe("tl_user_001");
+    expect(token?.tokenReference).toBeTruthy();
+    expect(token?.tokenReference).not.toContain("token-ref:");
     expect(JSON.stringify(clientSafeToken)).not.toContain("sandbox-code");
     expect(JSON.stringify(clientSafeToken)).not.toContain(configuredTrueLayer.clientSecret);
+    expect(JSON.stringify(clientSafeToken)).not.toContain(token?.tokenReference ?? "");
   });
 
   it("syncs TrueLayer mocked accounts and transactions through the generic workflow", async () => {

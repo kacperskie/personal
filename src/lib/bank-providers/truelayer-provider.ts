@@ -369,7 +369,9 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     const redirectUri = input.redirectUri ?? this.config.redirectUri;
     const connection: BankConnection = {
       id: connectionId,
+      userId: input.userId,
       provider: "truelayer",
+      providerUserId: input.userId ?? null,
       institutionName: input.institutionName || "TrueLayer sandbox",
       institutionId: input.institutionId || "truelayer_sandbox",
       status: this.config.configured ? "connecting" : "not_connected",
@@ -460,7 +462,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       userId: input.userId,
       connectionId: attempt.connectionId,
       provider: "truelayer",
-      encryptedTokenPlaceholder: "truelayer-token-placeholder",
+      tokenPayload: tokens,
       providerUserId,
       providerConnectionId: attempt.connectionId,
       expiresAt,
@@ -472,7 +474,9 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     return {
       connection: {
         id: attempt.connectionId,
+        userId: input.userId,
         provider: "truelayer",
+        providerUserId,
         institutionName: attempt.institutionName,
         institutionId: attempt.institutionId,
         status: "connected",
@@ -495,6 +499,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     return {
       id: connectionId,
       provider: "truelayer",
+      providerUserId: attempt?.providerUserId ?? null,
       institutionName: attempt?.institutionName ?? "TrueLayer sandbox",
       institutionId: attempt?.institutionId ?? "truelayer_sandbox",
       status: this.config.configured ? "connected" : "not_connected",
@@ -618,6 +623,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     return {
       id: connectionId,
       provider: "truelayer",
+      providerUserId: null,
       institutionName: "TrueLayer sandbox",
       institutionId: "truelayer_sandbox",
       status: "disconnected",

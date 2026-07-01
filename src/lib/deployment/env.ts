@@ -43,6 +43,7 @@ export type EnvironmentValidation = {
     openAiConfigured: boolean;
     moneyhubSandboxConfigured: boolean;
     truelayerSandboxConfigured: boolean;
+    tokenEncryptionConfigured: boolean;
     webPushPrivateKeyConfigured: boolean;
     cronSecretConfigured: boolean;
   };
@@ -137,7 +138,11 @@ export function validateDeploymentEnvironment(
     env.TRUELAYER_CLIENT_ID &&
       env.TRUELAYER_CLIENT_SECRET &&
       env.TRUELAYER_REDIRECT_URI &&
-      env.TRUELAYER_WEBHOOK_SECRET,
+      (env.TRUELAYER_API_BASE_URL || "https://api.truelayer-sandbox.com") &&
+      (env.TRUELAYER_AUTH_BASE_URL || "https://auth.truelayer-sandbox.com") &&
+      (env.TRUELAYER_SCOPES || "info accounts balance cards transactions offline_access") &&
+      env.TOKEN_ENCRYPTION_KEY &&
+      env.TOKEN_ENCRYPTION_KEY.length >= 32,
   );
   const webPushConfigured = Boolean(
     env.WEB_PUSH_VAPID_PUBLIC_KEY &&
@@ -178,6 +183,9 @@ export function validateDeploymentEnvironment(
       openAiConfigured: Boolean(env.OPENAI_API_KEY),
       moneyhubSandboxConfigured,
       truelayerSandboxConfigured,
+      tokenEncryptionConfigured: Boolean(
+        env.TOKEN_ENCRYPTION_KEY && env.TOKEN_ENCRYPTION_KEY.length >= 32,
+      ),
       webPushPrivateKeyConfigured: Boolean(env.WEB_PUSH_VAPID_PRIVATE_KEY),
       cronSecretConfigured: Boolean(env.CRON_SECRET),
     },

@@ -188,28 +188,33 @@ Troubleshooting:
 
 ## TrueLayer Sandbox Setup
 
-Phase 12A adds TrueLayer as a second provider adapter so the app can compare provider fit against Moneyhub before committing to one Open Banking provider. Provider-specific code remains inside `src/lib/bank-providers`, while the public app continues to use provider-agnostic routes and sync workflow helpers.
+TrueLayer is the first read-only banking data foundation. Provider-specific code remains inside `src/lib/bank-providers`, while the public app continues to use provider-agnostic routes and sync workflow helpers.
 
 Required placeholders:
 
 ```bash
 OPEN_BANKING_PROVIDER=truelayer
+OPEN_BANKING_ENABLED=true
+TRUELAYER_SANDBOX_ENABLED=true
 TRUELAYER_CLIENT_ID=
 TRUELAYER_CLIENT_SECRET=
-TRUELAYER_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback?provider=truelayer
+TRUELAYER_REDIRECT_URI=http://localhost:3000/api/bank-connections/callback
 TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com
 TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com
 TRUELAYER_WEBHOOK_SECRET=
 TRUELAYER_SCOPES=info accounts balance cards transactions offline_access
+TOKEN_ENCRYPTION_KEY=
 ```
 
 Provider selection:
 
 - Use `OPEN_BANKING_PROVIDER=mock` for local development with no banking API calls.
 - Use `OPEN_BANKING_PROVIDER=moneyhub` to test the existing Moneyhub sandbox path.
-- Use `OPEN_BANKING_PROVIDER=truelayer` to test the TrueLayer sandbox adapter path.
+- Use `OPEN_BANKING_ENABLED=true` and `OPEN_BANKING_PROVIDER=truelayer` to test the TrueLayer sandbox adapter path.
 
 Settings / Connected Accounts shows readiness and provider comparison for mock, Moneyhub, and TrueLayer. The comparison covers accounts, balances, transactions, credit-card handling, regular-payment support, webhook support, and target institutions to validate.
+
+Enabled now: consent start/callback, encrypted server-side token storage, accounts, balances, recent transactions, simple deterministic category hints, Firestore persistence, and dashboard values from synced bank data. Deliberately delayed: payments, transfers, AI coach, production Open Banking review, and webhook-driven sync.
 
 Target validation list:
 
@@ -730,9 +735,9 @@ Moneyhub sandbox setup:
 
 TrueLayer sandbox setup:
 
-- Set the staging callback URL to `/api/bank-connections/callback?provider=truelayer`.
-- Set the staging webhook URL to `/api/bank-connections/webhook/truelayer`.
-- Use sandbox credentials only.
+- Set the staging callback URL to `/api/bank-connections/callback`.
+- Set the staging webhook URL to `/api/bank-connections/webhook/truelayer` only before testing webhooks.
+- Use sandbox credentials only and configure a 32+ character `TOKEN_ENCRYPTION_KEY`.
 - Confirm callback and webhook failures remain provider-safe.
 
 OpenAI setup:

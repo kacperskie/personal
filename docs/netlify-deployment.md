@@ -60,18 +60,21 @@ Provider-specific optional values:
 
 ```bash
 OPEN_BANKING_PROVIDER=mock
-TRUELAYER_REDIRECT_URI=https://your-netlify-site.netlify.app/api/bank-connections/callback?provider=truelayer
+TRUELAYER_CLIENT_ID=
+TRUELAYER_CLIENT_SECRET=
+TRUELAYER_REDIRECT_URI=https://your-netlify-site.netlify.app/api/bank-connections/callback
 TRUELAYER_WEBHOOK_SECRET=
 TRUELAYER_API_BASE_URL=https://api.truelayer-sandbox.com
 TRUELAYER_AUTH_BASE_URL=https://auth.truelayer-sandbox.com
 TRUELAYER_SCOPES=info accounts balance cards transactions offline_access
+TOKEN_ENCRYPTION_KEY=
 MONEYHUB_REDIRECT_URI=https://your-netlify-site.netlify.app/api/bank-connections/callback
 MONEYHUB_WEBHOOK_SECRET=
 MONEYHUB_API_BASE_URL=https://api.moneyhub.co.uk/v2.0
 MONEYHUB_AUTH_BASE_URL=https://identity.moneyhub.co.uk
 ```
 
-Keep `SUPABASE_SERVICE_ROLE_KEY`, provider client secrets, `OPENAI_API_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `CRON_SECRET` server-side only in Netlify environment variables.
+Keep `SUPABASE_SERVICE_ROLE_KEY`, provider client secrets, `TOKEN_ENCRYPTION_KEY`, `OPENAI_API_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and `CRON_SECRET` server-side only in Netlify environment variables.
 
 Keep `FIREBASE_PRIVATE_KEY` and `FIREBASE_CLIENT_EMAIL` server-side only. Do not expose Firebase Admin credentials to browser code.
 
@@ -99,9 +102,11 @@ deployment. Legacy `supabase/migrations/*` remain only as archived references.
 
 TrueLayer:
 
-- Redirect URL: `https://your-netlify-site.netlify.app/api/bank-connections/callback?provider=truelayer`
-- Webhook URL: `https://your-netlify-site.netlify.app/api/bank-connections/webhook/truelayer`
-- Set `OPEN_BANKING_PROVIDER=truelayer` only when testing TrueLayer sandbox credentials.
+- Redirect URL: `https://your-netlify-site.netlify.app/api/bank-connections/callback`
+- Webhook URL: `https://your-netlify-site.netlify.app/api/bank-connections/webhook/truelayer` (deliberately not required for manual read-only sync)
+- Set `OPEN_BANKING_ENABLED=true`, `OPEN_BANKING_PROVIDER=truelayer`, `TRUELAYER_SANDBOX_ENABLED=true`, the TrueLayer client values, scopes, and a 32+ character `TOKEN_ENCRYPTION_KEY` only when testing read-only TrueLayer sandbox credentials.
+- Enabled now: consent start/callback, encrypted server-side token storage, account/balance/transaction fetch, deterministic category hints, Firestore persistence, and dashboard values from synced bank data.
+- Delayed deliberately: payments, bank transfers, AI coach, production token vaulting review, webhook-driven sync, and automatic category decisions.
 
 Moneyhub:
 

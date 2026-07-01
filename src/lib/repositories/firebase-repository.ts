@@ -19,6 +19,7 @@ import type {
   NotificationPreference,
   OverdraftPlan,
   PaydayPlan,
+  ProviderTokenStorageRecord,
   ProviderSyncEvent,
   PushSubscriptionRecord,
   RecurringPaymentCandidate,
@@ -53,6 +54,7 @@ export type FirebaseCollectionName =
   | "notificationPreferences"
   | "overdraftPlans"
   | "paydayPlans"
+  | "providerTokens"
   | "providerSyncEvents"
   | "pushSubscriptions"
   | "recurringPaymentCandidates"
@@ -81,6 +83,7 @@ type CollectionTypeMap = {
   notificationPreferences: NotificationPreference;
   overdraftPlans: OverdraftPlan;
   paydayPlans: PaydayPlan;
+  providerTokens: ProviderTokenStorageRecord;
   providerSyncEvents: ProviderSyncEvent;
   pushSubscriptions: PushSubscriptionRecord;
   recurringPaymentCandidates: RecurringPaymentCandidate;
