@@ -7,6 +7,7 @@ import {
 import { getClientWebPushConfig } from "@/lib/notifications/web-push";
 import { validateDeploymentEnvironment } from "@/lib/deployment/env";
 import { isFirebasePrivateKeyMalformed } from "@/lib/firebase/env";
+import type { FirebaseAdminInitialisationStatus } from "@/lib/firebase/admin-diagnostics";
 
 export type ReadinessStatus = "pass" | "warning" | "fail";
 
@@ -46,6 +47,7 @@ function check(
 
 export function buildSystemReadinessReport(
   env: NodeJS.ProcessEnv = process.env,
+  adminInitStatus: FirebaseAdminInitialisationStatus = "not_tested",
 ): SystemReadinessReport {
   const validation = validateDeploymentEnvironment(env);
   const webPush = getClientWebPushConfig(env);
@@ -59,6 +61,27 @@ export function buildSystemReadinessReport(
   const firebaseSelected = validation.backendProvider === "firebase";
   const mockSelected = validation.backendProvider === "mock";
   const firebasePrivateKeyMalformed = isFirebasePrivateKeyMalformed(env);
+  // When the caller supplies a real Firebase Admin initialisation result, drive
+  // the admin/firestore checks off it instead of mere env-var presence. This is
+  // how a green readiness page can still catch a key that parses past the PEM
+  // header check but fails actual `initializeApp`. "not_tested" keeps the prior
+  // presence-based behaviour so pure/synchronous callers are unchanged.
+  const firebaseAdminStatus: ReadinessStatus = !firebaseSelected
+    ? "pass"
+    : firebasePrivateKeyMalformed
+      ? "warning"
+      : adminInitStatus === "available"
+        ? "pass"
+        : adminInitStatus === "unavailable"
+          ? "fail"
+          : statusFromConfigured(validation.serverOnly.firebaseAdminConfigured);
+  const firestoreStatus: ReadinessStatus = !firebaseSelected
+    ? "pass"
+    : adminInitStatus === "available"
+      ? "pass"
+      : adminInitStatus === "unavailable"
+        ? "fail"
+        : statusFromConfigured(validation.serverOnly.firebaseAdminConfigured);
   const trueLayerSelected = env.OPEN_BANKING_PROVIDER === "truelayer";
   const selectedProvider = getOpenBankingProvider(env);
   const selectedProviderConfigured =
@@ -108,34 +131,40 @@ export function buildSystemReadinessReport(
     check(
       "firebase_admin",
       "Firebase Admin server setup",
-      firebaseSelected
-        ? firebasePrivateKeyMalformed
-          ? "warning"
-          : statusFromConfigured(validation.serverOnly.firebaseAdminConfigured)
-        : "pass",
+      firebaseAdminStatus,
       firebasePrivateKeyMalformed
         ? "A FIREBASE_PRIVATE_KEY is set but does not look like a PEM key; check for missing newlines or stray quotes."
-        : validation.serverOnly.firebaseAdminConfigured
-          ? "Firebase Admin credentials are configured server-side."
-          : "Missing; Firebase session verification and server Firestore writes are unavailable.",
+        : adminInitStatus === "available"
+          ? "Firebase Admin credentials are configured and initialise successfully."
+          : adminInitStatus === "unavailable"
+            ? "Firebase Admin credentials are present but initialisation failed; session cookies cannot be created. Check the private key formatting and service account."
+            : validation.serverOnly.firebaseAdminConfigured
+              ? "Firebase Admin credentials are configured server-side."
+              : "Missing; Firebase session verification and server Firestore writes are unavailable.",
       firebaseSelected
         ? firebasePrivateKeyMalformed
           ? "Re-paste FIREBASE_PRIVATE_KEY with escaped \\n newlines and no surrounding quotes."
-          : "Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY server-side."
+          : adminInitStatus === "unavailable"
+            ? "Re-check FIREBASE_PRIVATE_KEY newlines/quoting and that the service account matches the project."
+            : adminInitStatus === "available"
+              ? null
+              : "Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY server-side."
         : null,
     ),
     check(
       "firestore",
       "Firestore readiness",
+      firestoreStatus,
       firebaseSelected
-        ? statusFromConfigured(validation.serverOnly.firebaseAdminConfigured)
-        : "pass",
-      firebaseSelected
-        ? validation.serverOnly.firebaseAdminConfigured
+        ? adminInitStatus === "available"
           ? "Firestore is reachable via Firebase Admin for server reads and writes."
-          : "Firestore is unavailable until Firebase Admin credentials are configured."
+          : adminInitStatus === "unavailable"
+            ? "Firestore is unavailable because Firebase Admin failed to initialise."
+            : validation.serverOnly.firebaseAdminConfigured
+              ? "Firestore is reachable via Firebase Admin for server reads and writes."
+              : "Firestore is unavailable until Firebase Admin credentials are configured."
         : "Mock backend selected; Firestore is not required.",
-      firebaseSelected && !validation.serverOnly.firebaseAdminConfigured
+      firebaseSelected && firestoreStatus !== "pass"
         ? "Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, and FIREBASE_PRIVATE_KEY server-side."
         : null,
     ),

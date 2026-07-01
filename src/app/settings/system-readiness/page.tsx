@@ -4,6 +4,10 @@ import { StatusPill } from "@/components/status-pill";
 import { FirebaseConfigDiagnostics } from "@/components/firebase/config-diagnostics";
 import { buildSystemReadinessReport } from "@/lib/deployment/readiness";
 import { getFirebasePublicConfigDiagnostics } from "@/lib/firebase/diagnostics";
+import {
+  getFirebaseAdminDiagnostics,
+  testFirebaseAdminInitialisation,
+} from "@/lib/firebase/admin-diagnostics";
 
 export const dynamic = "force-dynamic";
 
@@ -13,15 +17,29 @@ const toneByStatus = {
   fail: "risk",
 } as const;
 
+const adminInitTone = {
+  available: "good",
+  unavailable: "risk",
+  not_tested: "warning",
+} as const;
+
+const adminInitLabel = {
+  available: "available",
+  unavailable: "unavailable",
+  not_tested: "not tested",
+} as const;
+
 const IconByStatus = {
   pass: CheckCircle2,
   warning: CircleDashed,
   fail: AlertTriangle,
 };
 
-export default function SystemReadinessPage() {
-  const report = buildSystemReadinessReport();
+export default async function SystemReadinessPage() {
+  const adminInitStatus = await testFirebaseAdminInitialisation();
+  const report = buildSystemReadinessReport(process.env, adminInitStatus);
   const firebaseDiagnostics = getFirebasePublicConfigDiagnostics();
+  const adminDiagnostics = getFirebaseAdminDiagnostics();
 
   return (
     <div className="space-y-6">
@@ -51,6 +69,39 @@ export default function SystemReadinessPage() {
         <div className="mt-4">
           <FirebaseConfigDiagnostics diagnostics={firebaseDiagnostics} />
         </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Firebase Admin server setup</h2>
+            <p className="mt-1 text-sm text-ink/65">
+              Server-only. Shows presence and shape of the Admin credentials and whether
+              initialisation actually succeeds. Values are never shown.
+            </p>
+          </div>
+          <StatusPill
+            label={`Admin init: ${adminInitLabel[adminInitStatus]}`}
+            tone={adminInitTone[adminInitStatus]}
+          />
+        </div>
+        <dl className="mt-4 space-y-1.5 rounded-lg border border-line bg-paper p-4 text-sm">
+          {adminDiagnostics.map((item) => (
+            <div key={item.name} className="flex items-center justify-between gap-4">
+              <dt className="font-mono text-xs text-ink/70">{item.name}</dt>
+              <dd className="rounded-full bg-ink/5 px-2.5 py-0.5 text-xs font-semibold text-ink/70">
+                {item.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-3 text-xs text-ink/55">
+          <span className="font-semibold">available</span> = credentials initialise;{" "}
+          <span className="font-semibold">unavailable</span> = present but init failed (check
+          the private key format);{" "}
+          <span className="font-semibold">not tested</span> = credentials missing or the key is
+          clearly malformed, so no init was attempted. Secret values are never rendered.
+        </p>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
