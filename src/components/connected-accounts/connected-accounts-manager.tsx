@@ -22,6 +22,14 @@ type SandboxCleanupPreview = {
   syncRuns: number;
 };
 
+export type ConnectionDisplaySummary = {
+  connectionId: string;
+  linkedAccountCount: number;
+  linkedTransactionCount: number;
+  linkedAccountNames: string[];
+  linkedInstitutionNames: string[];
+};
+
 const statusTone: Record<ConnectionLifecycleStatus, "good" | "neutral" | "warning" | "risk"> = {
   not_connected: "neutral",
   connecting: "neutral",
@@ -44,11 +52,28 @@ function labelStatus(status: string) {
   return status.replaceAll("_", " ");
 }
 
-function connectionMode(connection: BankConnection): "sandbox" | "live" {
+export function connectionMode(connection: BankConnection): "sandbox" | "live" {
   if (connection.mode) {
     return connection.mode;
   }
   return /live/i.test(connection.institutionId) ? "live" : "sandbox";
+}
+
+function isGenericConnectionName(value?: string | null) {
+  return !value || /^truelayer (live|sandbox)$/i.test(value);
+}
+
+export function shortConnectionId(connectionId: string) {
+  return connectionId.length > 8 ? connectionId.slice(-8) : connectionId;
+}
+
+function formatConnectionTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return "unknown time";
+  }
+  const [date = "", time = ""] = value.split("T");
+  const hhmm = time.slice(0, 5);
+  return `${date ? formatDateShort(date) : "unknown date"}${hhmm ? ` ${hhmm}` : ""}`;
 }
 
 /**
@@ -56,15 +81,26 @@ function connectionMode(connection: BankConnection): "sandbox" | "live" {
  * distinguishable (e.g. Nationwide, Revolut, American Express) instead of three
  * identical "TrueLayer live" cards.
  */
-function connectionTitle(connection: BankConnection): string {
-  const generic = /^truelayer (live|sandbox)$/i;
+export function connectionDisplayTitle(
+  connection: BankConnection,
+  summary?: ConnectionDisplaySummary,
+): string {
   const candidate = connection.providerName || connection.displayName || connection.institutionName;
-  if (candidate && !generic.test(candidate)) {
+  if (!isGenericConnectionName(candidate)) {
     return candidate;
   }
+  const linkedInstitution = summary?.linkedInstitutionNames.find(
+    (name) => !isGenericConnectionName(name),
+  );
+  if (linkedInstitution) {
+    return linkedInstitution;
+  }
+  const linkedAccountName = summary?.linkedAccountNames.find(Boolean);
+  if (linkedAccountName) {
+    return linkedAccountName;
+  }
   const created = connection.consentCompletedAt ?? connection.createdAt;
-  const date = created ? formatDateShort(created.slice(0, 10)) : "unknown date";
-  return `TrueLayer ${connectionMode(connection)} connection created ${date}`;
+  return `TrueLayer ${connectionMode(connection)} connection created ${formatConnectionTimestamp(created)}`;
 }
 
 const cardAccessReasons = new Set([
@@ -91,14 +127,50 @@ function needsReconnect(diagnostics?: ProviderTokenDiagnostics) {
   return diagnostics ? diagnostics.syncEligible !== "yes" : false;
 }
 
+export function canRemoveFailedConnectionAttempt(
+  connection: BankConnection,
+  summary?: ConnectionDisplaySummary,
+  diagnostics?: ProviderTokenDiagnostics,
+) {
+  const linkedAccountCount = summary?.linkedAccountCount ?? 0;
+  const linkedTransactionCount = summary?.linkedTransactionCount ?? 0;
+  const tokenRejectedOrRevoked =
+    connection.lastFailureReason === "truelayer_token_rejected" ||
+    connection.consentStatus === "revoked" ||
+    connection.status === "disconnected" ||
+    diagnostics?.reasonCode === "token_record_missing" ||
+    diagnostics?.syncEligible === "no";
+
+  return (
+    connectionMode(connection) === "live" &&
+    !connection.lastSyncedAt &&
+    linkedAccountCount === 0 &&
+    linkedTransactionCount === 0 &&
+    (connection.status === "sync_failed" ||
+      connection.status === "disconnected" ||
+      connection.consentStatus === "revoked") &&
+    tokenRejectedOrRevoked
+  );
+}
+
+export function connectionRevokePath(connectionId: string) {
+  return `/api/bank-connections/${connectionId}/revoke`;
+}
+
+export function failedAttemptRemovalPath(connectionId: string) {
+  return `/api/bank-connections/${connectionId}/failed-attempt`;
+}
+
 export function ConnectedAccountsManager({
   connections,
   tokenDiagnostics = {},
+  connectionSummaries = {},
   providerState,
   sandboxCleanupPreview,
 }: {
   connections: BankConnection[];
   tokenDiagnostics?: Record<string, ProviderTokenDiagnostics>;
+  connectionSummaries?: Record<string, ConnectionDisplaySummary>;
   providerState: {
     provider: BankProvider;
     configured: boolean;
@@ -114,6 +186,7 @@ export function ConnectedAccountsManager({
   );
   const [message, setMessage] = useState<string | null>(providerState.safeMessage);
   const [syncingConnectionIds, setSyncingConnectionIds] = useState<string[]>([]);
+  const [removingConnectionIds, setRemovingConnectionIds] = useState<string[]>([]);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [isPending, startTransition] = useTransition();
   const asOfDate = new Date().toISOString().slice(0, 10);
@@ -124,9 +197,10 @@ export function ConnectedAccountsManager({
         .map((connection) => ({
           ...connection,
           tokenDiagnostics: tokenDiagnostics[connection.id],
+          summary: connectionSummaries[connection.id],
           displayStatus: getConnectionLifecycleStatus(connection, asOfDate),
         })),
-    [connections, asOfDate, tokenDiagnostics],
+    [connections, asOfDate, tokenDiagnostics, connectionSummaries],
   );
   const hiddenFailedConsentAttempts = useMemo(
     () => connections.filter(isDeadPreConsentConnection).length,
@@ -148,9 +222,27 @@ export function ConnectedAccountsManager({
     : providerState.providerComparison;
   // Sandbox connections are only split out of the main list in production live
   // mode; in sandbox/dev mode all connections are shown as before.
-  const mainListConnections = liveMode
-    ? connectionsWithDisplayStatus.filter((connection) => !isSandboxConnection(connection))
-    : connectionsWithDisplayStatus;
+  const removableFailedAttempts = liveMode
+    ? connectionsWithDisplayStatus.filter((connection) =>
+        canRemoveFailedConnectionAttempt(
+          connection,
+          connection.summary,
+          connection.tokenDiagnostics,
+        ),
+      )
+    : [];
+  const mainListConnections = (
+    liveMode
+      ? connectionsWithDisplayStatus.filter((connection) => !isSandboxConnection(connection))
+      : connectionsWithDisplayStatus
+  ).filter(
+    (connection) =>
+      !canRemoveFailedConnectionAttempt(
+        connection,
+        connection.summary,
+        connection.tokenDiagnostics,
+      ),
+  );
   const collapsedSandboxConnections = liveMode
     ? connectionsWithDisplayStatus.filter((connection) => isSandboxConnection(connection))
     : [];
@@ -255,12 +347,61 @@ export function ConnectedAccountsManager({
     });
   }
 
-  function revokeConnection(connectionId: string) {
+  function connectionIdentityForConfirmation(
+    connection: BankConnection,
+    summary?: ConnectionDisplaySummary,
+  ) {
+    const accountNames = summary?.linkedAccountNames.length
+      ? `\nAccounts: ${summary.linkedAccountNames.join(", ")}`
+      : "";
+    return `${connectionDisplayTitle(connection, summary)}\nConnection: ${shortConnectionId(
+      connection.id,
+    )}\nCreated: ${formatConnectionTimestamp(connection.createdAt)}${accountNames}`;
+  }
+
+  function revokeConnection(connection: BankConnection, summary?: ConnectionDisplaySummary) {
+    const confirmed = window.confirm(
+      `Disconnect this connection only?\n\n${connectionIdentityForConfirmation(connection, summary)}`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     setMessage(null);
     startTransition(() => {
-      void postJson(`/api/bank-connections/${connectionId}/revoke`)
+      void postJson(connectionRevokePath(connection.id))
         .then((payload) => setMessage(payload.message ?? "Connection disconnected."))
         .catch((error: Error) => setMessage(error.message));
+    });
+  }
+
+  function removeFailedAttempt(connection: BankConnection, summary?: ConnectionDisplaySummary) {
+    const confirmed = window.confirm(
+      `Remove this failed connection attempt only?\n\n${connectionIdentityForConfirmation(
+        connection,
+        summary,
+      )}`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMessage(null);
+    setRemovingConnectionIds((current) => Array.from(new Set([...current, connection.id])));
+    startTransition(() => {
+      void postJson(failedAttemptRemovalPath(connection.id))
+        .then((payload) => {
+          setMessage(payload.message ?? "Failed connection attempt removed.");
+          window.location.assign("/settings/connected-accounts");
+        })
+        .catch((error: Error) => setMessage(error.message))
+        .finally(() =>
+          setRemovingConnectionIds((current) =>
+            current.filter((candidate) => candidate !== connection.id),
+          ),
+        );
     });
   }
 
@@ -621,6 +762,8 @@ export function ConnectedAccountsManager({
               {(() => {
                 const isSyncingConnection = syncingConnectionIds.includes(connection.id);
                 const reconnectRequired = needsReconnect(connection.tokenDiagnostics);
+                const summary = connection.summary;
+                const title = connectionDisplayTitle(connection, summary);
                 const displayLabel = reconnectRequired
                   ? "Reconnect required"
                   : isSyncingConnection
@@ -632,7 +775,7 @@ export function ConnectedAccountsManager({
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-ink">{connectionTitle(connection)}</h3>
+                    <h3 className="font-semibold text-ink">{title}</h3>
                     {connection.provider === "truelayer" ? (
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -647,11 +790,13 @@ export function ConnectedAccountsManager({
                   </div>
                   <p className="mt-1 text-sm text-ink/60">
                     Provider: {connection.providerName ?? connection.provider} - Institution ID:{" "}
-                    {connection.institutionId}
-                    {typeof connection.accountsSyncedCount === "number"
-                      ? ` - ${connection.accountsSyncedCount} account${connection.accountsSyncedCount === 1 ? "" : "s"} synced`
-                      : ""}
+                    {connection.institutionId} - Connection {shortConnectionId(connection.id)}
                   </p>
+                  {summary?.linkedAccountNames.length ? (
+                    <p className="mt-1 text-sm text-ink/70">
+                      Linked accounts: {summary.linkedAccountNames.join(", ")}
+                    </p>
+                  ) : null}
                 </div>
                 <StatusPill
                   label={displayLabel}
@@ -671,9 +816,29 @@ export function ConnectedAccountsManager({
               ) : null}
               <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                 <div>
+                  <dt className="text-ink/50">Created</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {formatConnectionTimestamp(connection.createdAt)}
+                  </dd>
+                </div>
+                <div>
                   <dt className="text-ink/50">Consent</dt>
                   <dd className="mt-1 font-semibold text-ink">
                     {labelStatus(connection.consentStatus)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink/50">Linked accounts</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {summary?.linkedAccountCount ??
+                      connection.accountsSyncedCount ??
+                      0}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-ink/50">Linked transactions</dt>
+                  <dd className="mt-1 font-semibold text-ink">
+                    {summary?.linkedTransactionCount ?? 0}
                   </dd>
                 </div>
                 <div>
@@ -803,7 +968,7 @@ export function ConnectedAccountsManager({
                 </button>
                 <button
                   type="button"
-                  onClick={() => revokeConnection(connection.id)}
+                  onClick={() => revokeConnection(connection, summary)}
                   disabled={isPending || connection.status === "disconnected"}
                   className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-berry disabled:opacity-50"
                 >
@@ -818,6 +983,53 @@ export function ConnectedAccountsManager({
           ))}
         </div>
       </section>
+
+      {removableFailedAttempts.length > 0 ? (
+        <section className="rounded-lg border border-saffron/30 bg-saffron/5 p-5">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-saffron" aria-hidden="true" />
+            <h2 className="text-lg font-semibold text-ink">Failed live connection attempts</h2>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-ink/70">
+            These live attempts have no successful sync, no linked accounts, and no linked
+            transactions. Removing one only deletes that failed connection record and its linked
+            token record.
+          </p>
+          <div className="mt-4 grid gap-3">
+            {removableFailedAttempts.map((connection) => {
+              const summary = connection.summary;
+              const isRemoving = removingConnectionIds.includes(connection.id);
+
+              return (
+                <div
+                  key={connection.id}
+                  className="flex flex-col gap-3 rounded-lg border border-line bg-white p-4 text-sm md:flex-row md:items-center md:justify-between"
+                >
+                  <div>
+                    <p className="font-semibold text-ink">
+                      {connectionDisplayTitle(connection, summary)}
+                    </p>
+                    <p className="mt-1 text-ink/60">
+                      Connection {shortConnectionId(connection.id)} - Created{" "}
+                      {formatConnectionTimestamp(connection.createdAt)} - Reason{" "}
+                      {connection.lastFailureReason ?? "token not usable"}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeFailedAttempt(connection, summary)}
+                    disabled={isPending || isRemoving}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 py-2 text-sm font-semibold text-berry disabled:opacity-50"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    {isRemoving ? "Removing" : "Remove failed connection attempt"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       {collapsedSandboxConnections.length > 0 ? (
         <section className="rounded-lg border border-line bg-white p-5 shadow-panel">

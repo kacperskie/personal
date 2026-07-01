@@ -596,6 +596,41 @@ export async function getBankConnectionById(id: string): Promise<BankConnection 
   return data ? bankConnectionFromRow(data) : null;
 }
 
+export async function deleteBankConnection(id: string): Promise<{ id: string }> {
+  if (isFirebaseBackend()) {
+    return deleteFirebaseDocument("bankConnections", id);
+  }
+
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return { id };
+  }
+
+  const { error } = await context.supabase
+    .from("bank_connections")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  await writeAudit(
+    context.userId,
+    createAuditEvent({
+      userId: context.userId,
+      eventType: "bank_connection_revoked",
+      entity: "bank_connections",
+      entityId: id,
+      metadata: { cleanup: "failed_connection_attempt" },
+    }),
+    context.supabase,
+  );
+
+  return { id };
+}
+
 export async function updateBankConnectionStatus(
   connection: BankConnection,
   eventType: "bank_connection_status_changed" | "bank_connection_sync_failed" | "bank_connection_revoked" = "bank_connection_status_changed",

@@ -7,8 +7,13 @@ import { getConnectionLifecycleStatus } from "@/lib/finance";
 import { getProviderConfiguredState } from "@/lib/bank-providers/provider-config";
 import { getProviderTokenDiagnostics } from "@/lib/bank-providers/token-store";
 import { getFirebaseSessionUser } from "@/lib/firebase/session";
-import { getBankConnections } from "@/lib/repositories/finance-repository";
+import {
+  getAccounts,
+  getBankConnections,
+  getTransactions,
+} from "@/lib/repositories/finance-repository";
 import { previewSandboxCleanup } from "@/lib/repositories/sandbox-cleanup";
+import type { ConnectionDisplaySummary } from "@/components/connected-accounts/connected-accounts-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -37,8 +42,10 @@ function labelStatus(status: string) {
 }
 
 export default async function ConnectedAccountsPage() {
-  const [bankConnections, user] = await Promise.all([
+  const [bankConnections, accounts, transactions, user] = await Promise.all([
     getBankConnections(),
+    getAccounts(),
+    getTransactions(),
     getFirebaseSessionUser(),
   ]);
   const tokenDiagnosticsEntries = user
@@ -52,6 +59,42 @@ export default async function ConnectedAccountsPage() {
       )
     : [];
   const tokenDiagnostics = Object.fromEntries(tokenDiagnosticsEntries);
+  const connectionSummaries: Record<string, ConnectionDisplaySummary> = Object.fromEntries(
+    bankConnections.map((connection) => {
+      const linkedAccounts = accounts.filter(
+        (account) => account.providerConnectionId === connection.id,
+      );
+      const linkedAccountIds = new Set(linkedAccounts.map((account) => account.id));
+      const linkedTransactions = transactions.filter((transaction) =>
+        linkedAccountIds.has(transaction.accountId),
+      );
+      const linkedAccountNames = Array.from(
+        new Set(
+          linkedAccounts
+            .map((account) => account.name || account.officialName)
+            .filter((name): name is string => Boolean(name)),
+        ),
+      ).slice(0, 4);
+      const linkedInstitutionNames = Array.from(
+        new Set(
+          linkedAccounts
+            .map((account) => account.institutionName)
+            .filter((name): name is string => Boolean(name)),
+        ),
+      ).slice(0, 4);
+
+      return [
+        connection.id,
+        {
+          connectionId: connection.id,
+          linkedAccountCount: linkedAccounts.length,
+          linkedTransactionCount: linkedTransactions.length,
+          linkedAccountNames,
+          linkedInstitutionNames,
+        },
+      ] as const;
+    }),
+  );
   const providerState = getProviderConfiguredState();
   const truelayerMode = providerState.truelayerReadiness?.mode ?? "sandbox";
   const sandboxCleanupPreview = user
@@ -106,6 +149,7 @@ export default async function ConnectedAccountsPage() {
       <ConnectedAccountsManager
         connections={bankConnections}
         tokenDiagnostics={tokenDiagnostics}
+        connectionSummaries={connectionSummaries}
         providerState={providerState}
         sandboxCleanupPreview={sandboxCleanupPreview}
       />

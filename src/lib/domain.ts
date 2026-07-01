@@ -185,8 +185,11 @@ export type BankConnection = {
 
 export type ProviderTokenStorageRecord = {
   id: string;
+  userId?: string;
   connectionId: string;
   provider: BankProvider;
+  mode?: "sandbox" | "live";
+  status?: "active" | "revoked";
   encryptedTokenPayload: string | null;
   tokenReference: string;
   providerUserId: string | null;

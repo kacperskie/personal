@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   Account,
   BankConnection,
@@ -28,7 +28,22 @@ import {
   getMoneyhubSandboxReadiness,
   getTrueLayerSandboxReadiness,
 } from "../src/lib/bank-providers/provider-config";
-import { ConnectedAccountsManager } from "../src/components/connected-accounts/connected-accounts-manager";
+import {
+  canRemoveFailedConnectionAttempt,
+  ConnectedAccountsManager,
+  connectionDisplayTitle,
+  connectionRevokePath,
+  failedAttemptRemovalPath,
+  shortConnectionId,
+} from "../src/components/connected-accounts/connected-accounts-manager";
+import { ProviderSafeError } from "../src/lib/bank-providers/provider-errors";
+import { syncBankConnection } from "../src/lib/bank-providers/sync-workflow";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetModules();
+  vi.unstubAllEnvs();
+});
 
 function connection(overrides: Partial<BankConnection>): BankConnection {
   return {
@@ -299,5 +314,384 @@ describe("Connected Accounts live-mode UI hides Moneyhub/mock provider", () => {
     expect(html).toContain("truelayer_accounts_endpoint_not_supported");
     expect(html).toContain("Reconnect with card access");
     expect(html).not.toContain("live-secret-value");
+  });
+});
+
+describe("per-connection live connection identity and cleanup", () => {
+  const providerState = {
+    provider: "truelayer" as const,
+    configured: true,
+    safeMessage: "",
+    truelayerReadiness: getTrueLayerSandboxReadiness({
+      OPEN_BANKING_ENABLED: "true",
+      OPEN_BANKING_PROVIDER: "truelayer",
+      TRUELAYER_SANDBOX_ENABLED: "false",
+      TRUELAYER_CLIENT_ID: "live-client-id",
+      TRUELAYER_CLIENT_SECRET: "live-secret-value",
+      TRUELAYER_REDIRECT_URI: "https://app.example.com/api/bank-connections/callback",
+      TOKEN_ENCRYPTION_KEY: "x".repeat(32),
+    } as unknown as NodeJS.ProcessEnv),
+    moneyhubReadiness: getMoneyhubSandboxReadiness(),
+  };
+
+  it("falls back to linked account metadata for generic live connection titles", () => {
+    const generic = connection({
+      id: "conn_live_nationwide_12345678",
+      mode: "live",
+      institutionName: "TrueLayer live",
+      institutionId: "truelayer_live",
+      lastSyncedAt: "2026-07-01T09:00:00.000Z",
+    });
+    const summary = {
+      connectionId: generic.id,
+      linkedAccountCount: 2,
+      linkedTransactionCount: 7,
+      linkedAccountNames: ["Bills Current", "Grad Current"],
+      linkedInstitutionNames: ["Nationwide"],
+    };
+
+    const html = renderToStaticMarkup(
+      createElement(ConnectedAccountsManager, {
+        connections: [generic],
+        tokenDiagnostics: {},
+        connectionSummaries: { [generic.id]: summary },
+        providerState,
+      }),
+    );
+
+    expect(connectionDisplayTitle(generic, summary)).toBe("Nationwide");
+    expect(html).toContain("Nationwide");
+    expect(html).toContain("Linked accounts: Bills Current, Grad Current");
+    expect(html).toContain("Linked transactions");
+    expect(html).toContain("7");
+    expect(html).toContain(shortConnectionId(generic.id));
+    expect(html).not.toContain("live-secret-value");
+  });
+
+  it("builds exact per-connection action paths", () => {
+    expect(connectionRevokePath("conn_live_a")).toBe(
+      "/api/bank-connections/conn_live_a/revoke",
+    );
+    expect(failedAttemptRemovalPath("conn_live_b")).toBe(
+      "/api/bank-connections/conn_live_b/failed-attempt",
+    );
+  });
+
+  it("identifies removable failed live attempts without including synced connections", () => {
+    const failed = connection({
+      id: "conn_failed_live",
+      mode: "live",
+      status: "sync_failed",
+      consentStatus: "active",
+      lastFailureReason: "truelayer_token_rejected",
+    });
+    const synced = connection({
+      id: "conn_synced_live",
+      mode: "live",
+      status: "sync_failed",
+      consentStatus: "active",
+      lastSyncedAt: "2026-07-01T09:00:00.000Z",
+      lastFailureReason: "truelayer_token_rejected",
+    });
+
+    expect(
+      canRemoveFailedConnectionAttempt(failed, {
+        connectionId: failed.id,
+        linkedAccountCount: 0,
+        linkedTransactionCount: 0,
+        linkedAccountNames: [],
+        linkedInstitutionNames: [],
+      }),
+    ).toBe(true);
+    expect(
+      canRemoveFailedConnectionAttempt(synced, {
+        connectionId: synced.id,
+        linkedAccountCount: 0,
+        linkedTransactionCount: 0,
+        linkedAccountNames: [],
+        linkedInstitutionNames: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("disconnecting one live connection only updates that connection and token", async () => {
+    const store = new Map<string, BankConnection>([
+      [
+        "conn_live_a",
+        connection({
+          id: "conn_live_a",
+          mode: "live",
+          providerName: "Nationwide",
+          institutionName: "Nationwide",
+          institutionId: "truelayer_live",
+        }),
+      ],
+      [
+        "conn_live_b",
+        connection({
+          id: "conn_live_b",
+          mode: "live",
+          providerName: "Revolut",
+          institutionName: "Revolut",
+          institutionId: "truelayer_live",
+        }),
+      ],
+      ["conn_sandbox", connection({ id: "conn_sandbox", mode: "sandbox", institutionId: "truelayer_sandbox" })],
+    ]);
+    const revokedTokens: string[] = [];
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async (id: string) => store.get(id) ?? null,
+      updateBankConnectionStatus: async (updated: BankConnection) => {
+        store.set(updated.id, updated);
+        return updated;
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      getProviderToken: async (_userId: string, connectionId: string) => ({
+        connectionId,
+        provider: "truelayer",
+        tokenReference: `token-${connectionId}`,
+        providerUserId: "tl_user",
+        providerConnectionId: connectionId,
+        scopes: ["accounts"],
+      }),
+      revokeProviderToken: async (_userId: string, connectionId: string) => {
+        revokedTokens.push(connectionId);
+        return { revoked: true, connectionId, revokedAt: "2026-07-01T10:00:00.000Z" };
+      },
+    }));
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({
+      getProviderAdapter: () => ({
+        revokeConnection: async (id: string) =>
+          connection({
+            id,
+            institutionName: "TrueLayer live",
+            institutionId: "truelayer_live",
+            status: "disconnected",
+            consentStatus: "revoked",
+          }),
+      }),
+    }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/revoke/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_live_a/revoke", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: "conn_live_a" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(store.get("conn_live_a")?.status).toBe("disconnected");
+    expect(store.get("conn_live_a")?.institutionName).toBe("Nationwide");
+    expect(store.get("conn_live_b")?.status).toBe("connected");
+    expect(store.get("conn_sandbox")?.status).toBe("connected");
+    expect(revokedTokens).toEqual(["conn_live_a"]);
+  });
+
+  it("disconnecting sandbox does not affect a live connection", async () => {
+    const store = new Map<string, BankConnection>([
+      ["conn_live", connection({ id: "conn_live", mode: "live", institutionId: "truelayer_live" })],
+      ["conn_sandbox", connection({ id: "conn_sandbox", mode: "sandbox", institutionId: "truelayer_sandbox" })],
+    ]);
+    const revokedTokens: string[] = [];
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async (id: string) => store.get(id) ?? null,
+      updateBankConnectionStatus: async (updated: BankConnection) => {
+        store.set(updated.id, updated);
+        return updated;
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      getProviderToken: async (_userId: string, connectionId: string) => ({
+        connectionId,
+        provider: "truelayer",
+        tokenReference: `token-${connectionId}`,
+        providerUserId: "tl_user",
+        providerConnectionId: connectionId,
+        scopes: ["accounts"],
+      }),
+      revokeProviderToken: async (_userId: string, connectionId: string) => {
+        revokedTokens.push(connectionId);
+        return { revoked: true, connectionId, revokedAt: "2026-07-01T10:00:00.000Z" };
+      },
+    }));
+    vi.doMock("@/lib/bank-providers/provider-service", () => ({
+      getProviderAdapter: () => ({ revokeConnection: async () => undefined }),
+    }));
+    vi.doMock("@/lib/repositories/notification-repository", () => ({
+      createNotification: async (notification: unknown) => notification,
+    }));
+
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/revoke/route");
+    await POST(
+      new Request("http://localhost/api/bank-connections/conn_sandbox/revoke", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: "conn_sandbox" }) },
+    );
+
+    expect(store.get("conn_sandbox")?.status).toBe("disconnected");
+    expect(store.get("conn_live")?.status).toBe("connected");
+    expect(revokedTokens).toEqual(["conn_sandbox"]);
+  });
+
+  it("removes a failed live attempt by exact connection id only", async () => {
+    const deletedConnections: string[] = [];
+    const deletedTokens: string[] = [];
+    const failed = connection({
+      id: "conn_failed_live",
+      mode: "live",
+      status: "sync_failed",
+      consentStatus: "active",
+      lastFailureReason: "truelayer_token_rejected",
+    });
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async (id: string) => (id === failed.id ? failed : null),
+      getAccounts: async () => [],
+      getTransactions: async () => [],
+      deleteBankConnection: async (id: string) => {
+        deletedConnections.push(id);
+        return { id };
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      getProviderTokenDiagnostics: async () => ({
+        connectionId: failed.id,
+        tokenRecordPresent: true,
+        tokenDecryptable: "yes",
+        tokenLinkedToConnection: "yes",
+        syncEligible: "no",
+        reasonCode: "token_record_missing",
+      }),
+      deleteProviderTokenForConnection: async (_userId: string, connectionId: string) => {
+        deletedTokens.push(connectionId);
+        return { id: connectionId };
+      },
+    }));
+
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/failed-attempt/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_failed_live/failed-attempt", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: failed.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(deletedConnections).toEqual([failed.id]);
+    expect(deletedTokens).toEqual([failed.id]);
+  });
+
+  it("does not remove a successfully synced live connection as a failed attempt", async () => {
+    const deletedConnections: string[] = [];
+    const synced = connection({
+      id: "conn_synced_live",
+      mode: "live",
+      status: "sync_failed",
+      consentStatus: "active",
+      lastSyncedAt: "2026-07-01T09:00:00.000Z",
+      lastFailureReason: "truelayer_token_rejected",
+    });
+
+    vi.doMock("@/lib/server/route-auth", () => ({
+      requireAuthenticatedRouteUser: async () => ({ user: { id: "user_live" } }),
+      unauthenticatedResponse: () => new Response("unauthenticated", { status: 401 }),
+    }));
+    vi.doMock("@/lib/repositories/finance-repository", () => ({
+      getBankConnectionById: async () => synced,
+      getAccounts: async () => [],
+      getTransactions: async () => [],
+      deleteBankConnection: async (id: string) => {
+        deletedConnections.push(id);
+        return { id };
+      },
+      recordAuditEvent: async (event: unknown) => event,
+    }));
+    vi.doMock("@/lib/bank-providers/token-store", () => ({
+      getProviderTokenDiagnostics: async () => ({
+        connectionId: synced.id,
+        tokenRecordPresent: true,
+        tokenDecryptable: "yes",
+        tokenLinkedToConnection: "yes",
+        syncEligible: "no",
+        reasonCode: "token_record_missing",
+      }),
+      deleteProviderTokenForConnection: async () => ({ id: synced.id }),
+    }));
+
+    const { POST } = await import("../src/app/api/bank-connections/[connectionId]/failed-attempt/route");
+    const response = await POST(
+      new Request("http://localhost/api/bank-connections/conn_synced_live/failed-attempt", {
+        method: "POST",
+      }),
+      { params: Promise.resolve({ connectionId: synced.id }) },
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.reason).toBe("not_removable_failed_attempt");
+    expect(deletedConnections).toEqual([]);
+  });
+
+  it("sync failure on one connection updates only that connection", async () => {
+    const updates: BankConnection[] = [];
+    const failing = connection({ id: "conn_live_a", mode: "live" });
+    const result = await syncBankConnection({
+      userId: "user_live",
+      connection: failing,
+      provider: {
+        createConnection: vi.fn(),
+        handleCallback: vi.fn(),
+        getConnectionStatus: vi.fn(async () => failing),
+        getAccounts: vi.fn(async () => {
+          throw new ProviderSafeError(
+            "provider_sync_failed",
+            "TrueLayer rejected the access token. Reconnect the live account.",
+            401,
+            "truelayer_token_rejected",
+          );
+        }),
+        getTransactions: vi.fn(),
+        refreshConnection: vi.fn(),
+        revokeConnection: vi.fn(),
+      },
+      providerContext: { tokenReference: "token" },
+      dependencies: {
+        upsertAccount: vi.fn(),
+        upsertTransaction: vi.fn(),
+        recordProviderSyncEvent: vi.fn(async (event) => event),
+        updateBankConnectionStatus: vi.fn(async (updated) => {
+          updates.push(updated);
+          return updated;
+        }),
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].id).toBe("conn_live_a");
+    expect(updates[0].status).toBe("sync_failed");
   });
 });

@@ -3,6 +3,7 @@ import "server-only";
 import type { BankProvider, ProviderTokenStorageRecord } from "@/lib/domain";
 import { isFirebaseBackend } from "@/lib/backend/provider";
 import {
+  deleteFirebaseDocument,
   getFirebaseAuthenticatedContext,
   upsertFirebaseDocument,
 } from "@/lib/repositories/firebase-repository";
@@ -15,8 +16,11 @@ import {
 } from "@/lib/security/token-encryption";
 
 export type ProviderTokenRecord = {
+  userId?: string;
   connectionId: string;
   provider: BankProvider;
+  mode?: "sandbox" | "live";
+  status?: "active" | "revoked";
   tokenReference: string;
   encryptedTokenPayload: string | null;
   refreshTokenPresent?: boolean;
@@ -65,6 +69,7 @@ export type SaveProviderTokenInput = {
   userId: string;
   connectionId: string;
   provider: BankProvider;
+  mode?: "sandbox" | "live";
   encryptedTokenPlaceholder?: string;
   tokenPayload?: unknown;
   providerUserId?: string | null;
@@ -161,6 +166,9 @@ function storageToRuntimeRecord(
   return {
     connectionId: record.connectionId,
     provider: record.provider,
+    userId: record.userId,
+    mode: record.mode,
+    status: record.status ?? (record.revokedAt ? "revoked" : "active"),
     tokenReference,
     encryptedTokenPayload: record.encryptedTokenPayload,
     refreshTokenPresent: Boolean(record.encryptedTokenPayload && record.refreshTokenExpiresAt),
@@ -227,8 +235,11 @@ export async function saveProviderToken(
     ? (accessTokenFromPayload(input.tokenPayload) ?? `token-ref:${input.provider}:${input.connectionId}`)
     : `token-ref:${input.provider}:${input.connectionId}`;
   const record: ProviderTokenRecord = {
+    userId: input.userId,
     connectionId: input.connectionId,
     provider: input.provider,
+    mode: input.mode,
+    status: "active",
     tokenReference,
     encryptedTokenPayload,
     refreshTokenPresent,
@@ -282,14 +293,15 @@ function diagnosticsForRecord(
   changes: Partial<ProviderTokenDiagnostics> = {},
 ): ProviderTokenDiagnostics {
   const linked = record.connectionId === connectionId;
+  const revoked = record.status === "revoked" || Boolean(record.revokedAt);
 
   return {
     connectionId,
     tokenRecordPresent: true,
     tokenDecryptable: "not_tested",
     tokenLinkedToConnection: linked ? "yes" : "no",
-    syncEligible: linked ? "yes" : "no",
-    reasonCode: linked ? null : "token_connection_id_mismatch",
+    syncEligible: linked && !revoked ? "yes" : "no",
+    reasonCode: linked ? (revoked ? "token_record_missing" : null) : "token_connection_id_mismatch",
     ...changes,
   };
 }
@@ -312,13 +324,16 @@ export async function getProviderTokenDiagnostics(
         ? storageToRuntimeRecord(stored as ProviderTokenStorageRecord)
         : (stored as ProviderTokenRecord);
     const linked = record.connectionId === connectionId;
+    const revoked = record.status === "revoked" || Boolean(record.revokedAt);
     const expiredWithoutRefresh = isExpired(record.accessTokenExpiresAt) && !record.refreshTokenPresent;
 
     return diagnosticsForRecord(connectionId, record, {
       tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
-      syncEligible: linked && !expiredWithoutRefresh ? "yes" : "no",
+      syncEligible: linked && !revoked && !expiredWithoutRefresh ? "yes" : "no",
       reasonCode: !linked
         ? "token_connection_id_mismatch"
+        : revoked
+          ? "token_record_missing"
         : expiredWithoutRefresh
           ? "token_expired_refresh_missing"
           : null,
@@ -381,6 +396,20 @@ export async function getProviderTokenForSync(
         tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
         syncEligible: "no",
         reasonCode: "token_connection_id_mismatch",
+      }),
+    };
+  }
+
+  if (record.status === "revoked" || record.revokedAt) {
+    return {
+      ok: false,
+      reason: "token_record_missing",
+      status: 409,
+      message: "Reconnect required before this bank connection can sync.",
+      diagnostics: diagnosticsForRecord(connectionId, record, {
+        tokenDecryptable: record.encryptedTokenPayload ? "yes" : "not_tested",
+        syncEligible: "no",
+        reasonCode: "token_record_missing",
       }),
     };
   }
@@ -455,6 +484,7 @@ export async function revokeProviderToken(
   if (existing) {
     tokenPlaceholders.set(tokenKey(userId, connectionId), {
       ...existing,
+      status: "revoked",
       revokedAt,
       updatedAt: revokedAt,
     });
@@ -468,6 +498,7 @@ export async function revokeProviderToken(
     if (existingStored) {
       await upsertFirebaseDocument("providerTokens", {
         ...existingStored,
+        status: "revoked",
         revokedAt,
         updatedAt: revokedAt,
       });
@@ -475,6 +506,23 @@ export async function revokeProviderToken(
   }
 
   return { revoked: true, connectionId, revokedAt };
+}
+
+export async function deleteProviderTokenForConnection(
+  userId: string,
+  connectionId: string,
+): Promise<{ id: string }> {
+  tokenPlaceholders.delete(tokenKey(userId, connectionId));
+
+  if (isFirebaseBackend()) {
+    const context = await getFirebaseAuthenticatedContext();
+
+    if (context?.userId === userId) {
+      await deleteFirebaseDocument("providerTokens", connectionId);
+    }
+  }
+
+  return { id: connectionId };
 }
 
 export function isProviderTokenStoreAvailable(env: NodeJS.ProcessEnv = process.env) {

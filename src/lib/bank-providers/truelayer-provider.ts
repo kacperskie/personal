@@ -705,6 +705,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
       userId: input.userId,
       connectionId: attempt.connectionId,
       provider: "truelayer",
+      mode: this.config.mode,
       tokenPayload: tokens,
       providerUserId,
       providerConnectionId: attempt.connectionId,

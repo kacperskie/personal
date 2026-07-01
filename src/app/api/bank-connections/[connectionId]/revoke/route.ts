@@ -51,19 +51,21 @@ export async function POST(
       connection.provider === "mock"
         ? null
         : await getProviderToken(auth.user.id, connection.id);
-    const revoked = await provider.revokeConnection(connection.id, {
+    await provider.revokeConnection(connection.id, {
       providerUserId: tokenRecord?.providerUserId,
       providerConnectionId: tokenRecord?.providerConnectionId,
       tokenReference: tokenRecord?.tokenReference,
     });
     await revokeProviderToken(auth.user.id, connection.id);
+    const revokedAt = new Date().toISOString();
     const saved = await updateBankConnectionStatus(
       {
         ...connection,
-        ...revoked,
         status: "disconnected",
         consentStatus: "revoked",
-        updatedAt: new Date().toISOString(),
+        consentExpiresAt: null,
+        errorMessage: null,
+        updatedAt: revokedAt,
       },
       "bank_connection_revoked",
     );
