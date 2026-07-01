@@ -26,6 +26,11 @@ export const runtime = "nodejs";
 type StepDiagnostic = {
   errorName: string;
   firebaseErrorCode: string | null;
+  // TEMPORARY: the raw thrown message. For a module-load failure this is a
+  // loader string (e.g. "Cannot find module 'jose'" or an ERR_REQUIRE_ESM
+  // message), not secret. It is still passed through the no-secret-substring
+  // guard in diagnosticResponse before being returned. Remove before merge.
+  errorMessage: string;
 };
 
 function classifyError(error: unknown): StepDiagnostic {
@@ -37,6 +42,7 @@ function classifyError(error: unknown): StepDiagnostic {
   return {
     errorName: error instanceof Error ? error.name : "UnknownError",
     firebaseErrorCode: code,
+    errorMessage: error instanceof Error ? error.message : String(error),
   };
 }
 

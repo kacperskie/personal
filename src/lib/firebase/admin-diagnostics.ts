@@ -69,6 +69,11 @@ export function getFirebaseAdminDiagnostics(
  * Attempt a lazy Firebase Admin initialisation and report only the outcome.
  * Returns "not_tested" when required env is absent or the key is clearly
  * malformed (no point attempting), so we never throw or surface secret state.
+ *
+ * IMPORTANT: this exercises `createFirebaseAdminAuth`, not just app init, so it
+ * imports `firebase-admin/auth` — the subpackage the sign-in path actually needs.
+ * A previous version only tested app init and could report "available" while
+ * `firebase-admin/auth` failed to load, masking the real sign-in failure.
  */
 export async function testFirebaseAdminInitialisation(
   env: NodeJS.ProcessEnv = process.env,
@@ -86,9 +91,9 @@ export async function testFirebaseAdminInitialisation(
   }
 
   try {
-    const { createFirebaseAdminApp } = await import("@/lib/firebase/admin");
-    const app = await createFirebaseAdminApp();
-    return app ? "available" : "unavailable";
+    const { createFirebaseAdminAuth } = await import("@/lib/firebase/admin");
+    const auth = await createFirebaseAdminAuth();
+    return auth ? "available" : "unavailable";
   } catch {
     return "unavailable";
   }

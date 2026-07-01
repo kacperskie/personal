@@ -83,7 +83,22 @@ export async function createFirebaseAdminAuth(): Promise<Auth | null> {
   try {
     const { getAuth } = await import("firebase-admin/auth");
     return getAuth(app);
-  } catch {
+  } catch (error) {
+    // Previously a bare `catch { return null }` that silently masked a real
+    // throw. The app subpackage can load while `firebase-admin/auth` (which
+    // pulls jwks-rsa -> jose, ESM) fails to load in the deployed function — the
+    // exact failure behind the session route. Log a non-secret code + error
+    // name/message so it is legible; return contract unchanged (still null).
+    logServerEvent({
+      level: "error",
+      event: "auth_event",
+      message: "Firebase Admin auth subpackage failed to load; session cookies unavailable.",
+      metadata: {
+        code: "firebase_admin_auth_load_failure",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      },
+    });
     return null;
   }
 }
@@ -98,7 +113,19 @@ export async function createFirebaseAdminFirestore(): Promise<Firestore | null> 
   try {
     const { getFirestore } = await import("firebase-admin/firestore");
     return getFirestore(app);
-  } catch {
+  } catch (error) {
+    // Same rationale as createFirebaseAdminAuth: surface a masked load failure
+    // of the firestore subpackage instead of silently returning null.
+    logServerEvent({
+      level: "error",
+      event: "auth_event",
+      message: "Firebase Admin firestore subpackage failed to load; server reads/writes unavailable.",
+      metadata: {
+        code: "firebase_admin_firestore_load_failure",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      },
+    });
     return null;
   }
 }
