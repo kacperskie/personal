@@ -11,7 +11,9 @@ import type {
   SavingsGoal,
   Subscription,
   Transaction,
+  TransactionBudgetOverride,
 } from "@/lib/domain";
+import { filterTransactionsForBudget } from "@/lib/finance-interpretation";
 
 export type BudgetPaceStatus = "under pace" | "on pace" | "high" | "risk";
 export type Tone = "good" | "neutral" | "warning" | "risk";
@@ -370,13 +372,24 @@ export function calculateMonthlySpending(
   transactions: Transaction[],
   manualFinanceItems: ManualFinanceItem[],
   period: BudgetPeriod,
+  accounts: Account[] = [],
+  transactionBudgetOverrides: TransactionBudgetOverride[] = [],
 ) {
-  const transactionSpending = transactions
+  const interpretedTransactions =
+    accounts.length > 0 || transactionBudgetOverrides.length > 0
+      ? filterTransactionsForBudget(
+          transactions,
+          accounts,
+          transactionBudgetOverrides,
+          "monthly",
+        )
+      : transactions.filter((transaction) => !isOwnAccountTransfer(transaction));
+
+  const transactionSpending = interpretedTransactions
     .filter(
       (transaction) =>
         transaction.kind === "expense" &&
         transaction.amount < 0 &&
-        !isOwnAccountTransfer(transaction) &&
         isDateInRange(transaction.date, period.startDate, period.endDate),
     )
     .reduce((total, transaction) => total + absoluteAmount(transaction.amount), 0);
@@ -399,13 +412,24 @@ export function calculateSpendByCategory(
   transactions: Transaction[],
   categories: Category[],
   period: BudgetPeriod,
+  accounts: Account[] = [],
+  transactionBudgetOverrides: TransactionBudgetOverride[] = [],
 ): SpendByCategory[] {
-  const spendByCategoryId = transactions
+  const interpretedTransactions =
+    accounts.length > 0 || transactionBudgetOverrides.length > 0
+      ? filterTransactionsForBudget(
+          transactions,
+          accounts,
+          transactionBudgetOverrides,
+          "summaries",
+        )
+      : transactions.filter((transaction) => !isOwnAccountTransfer(transaction));
+
+  const spendByCategoryId = interpretedTransactions
     .filter(
       (transaction) =>
         transaction.kind === "expense" &&
         transaction.amount < 0 &&
-        !isOwnAccountTransfer(transaction) &&
         isDateInRange(transaction.date, period.startDate, period.endDate),
     )
     .reduce<Record<string, number>>((groups, transaction) => {
@@ -476,8 +500,16 @@ export function calculateBudgetHealth(
   categories: Category[],
   period: BudgetPeriod,
   elapsedBudgetPeriodRatio: number,
+  accounts: Account[] = [],
+  transactionBudgetOverrides: TransactionBudgetOverride[] = [],
 ): BudgetHealthItem[] {
-  const spendByCategory = calculateSpendByCategory(transactions, categories, period);
+  const spendByCategory = calculateSpendByCategory(
+    transactions,
+    categories,
+    period,
+    accounts,
+    transactionBudgetOverrides,
+  );
 
   return budgets.map((budget) => {
     const category =

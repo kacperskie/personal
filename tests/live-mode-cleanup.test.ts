@@ -145,6 +145,7 @@ function dashboardData(): DashboardSummaryData {
     budgetPeriods: [],
     categories: [],
     bankConnections: [liveConnection, sandboxConnection],
+    transactionBudgetOverrides: [],
   };
 }
 

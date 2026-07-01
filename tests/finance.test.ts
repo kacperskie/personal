@@ -26,6 +26,11 @@ import {
   getUpcomingBillItems,
   getUpcomingManualCashflowItems,
 } from "../src/lib/finance";
+import {
+  amexFundingSummary,
+  calculateBudgetTotal,
+  getTransactionBudgetTreatment,
+} from "../src/lib/finance-interpretation";
 import { mockOpenBankingProvider } from "../src/lib/bank-providers";
 import {
   mockAccounts,
@@ -41,6 +46,7 @@ import {
   mockTransactionRecords,
   mockUserProfile,
 } from "../src/lib/mock-data";
+import type { Account, Transaction, TransactionBudgetOverride } from "../src/lib/domain";
 
 const currentPeriod = mockBudgetPeriods[0];
 const projectionPeriod = mockBudgetPeriods[1];
@@ -253,6 +259,142 @@ describe("finance calculations", () => {
     expect(health).toHaveLength(5);
     expect(homeBills?.remaining).toBe(-16);
     expect(homeBills?.status).toBe("on pace");
+  });
+
+  it("respects transaction budget overrides without mutating raw transactions", () => {
+    const account = {
+      ...mockAccounts[0],
+      id: "acct_budget_spend",
+      institutionName: "Revolut",
+      institutionId: "revolut",
+      name: "Spending account",
+      officialName: "Spending account",
+      type: "current_account",
+      subtype: "current",
+      purpose: "everyday_spending",
+      reservedFor: null,
+    } satisfies Account;
+    const purchase: Transaction = {
+      ...mockTransactionRecords[0],
+      id: "txn_override_purchase",
+      accountId: account.id,
+      merchant: "Coffee Shop",
+      description: "Flat white",
+      categoryId: "cat_eating_out",
+      amount: -40,
+      kind: "expense",
+      flags: [],
+      date: currentPeriod.startDate,
+    };
+    const rawBefore = { ...purchase };
+    const exclude: TransactionBudgetOverride = {
+      id: "txbo_txn_override_purchase",
+      userId: account.userId,
+      transactionId: purchase.id,
+      accountId: purchase.accountId,
+      includeInWeeklyBudget: false,
+      includeInMonthlyBudget: false,
+      includeInSpendingSummaries: false,
+      includeInSafeToSpendImpact: false,
+      budgetCategory: purchase.categoryId,
+      exclusionReason: "ignored",
+      userNote: "Do not budget",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      updatedAt: "2026-07-01T00:00:00.000Z",
+    };
+
+    expect(
+      calculateBudgetTotal([purchase], [account], [], currentPeriod, "weekly"),
+    ).toBe(40);
+    expect(
+      calculateBudgetTotal([purchase], [account], [exclude], currentPeriod, "weekly"),
+    ).toBe(0);
+    expect(purchase).toEqual(rawBefore);
+  });
+
+  it("defaults Amex payments, internal transfers and Amex pocket transfers out of budgets", () => {
+    const account = {
+      ...mockAccounts[0],
+      name: "Revolut AMEX pocket",
+      institutionName: "Revolut",
+      purpose: "pocket",
+      reservedFor: "amex",
+    } satisfies Account;
+    const transfer = {
+      ...mockTransactionRecords[0],
+      id: "txn_amex_pocket",
+      accountId: account.id,
+      description: "Transfer to AMEX pocket",
+      merchant: "Revolut",
+      amount: -50,
+      kind: "transfer" as const,
+      flags: [],
+    };
+    const treatment = getTransactionBudgetTreatment(transfer, account, null);
+
+    expect(treatment.includeInWeeklyBudget).toBe(false);
+    expect(treatment.includeInMonthlyBudget).toBe(false);
+    expect(treatment.exclusionReason).toBe("amex_pocket_transfer");
+  });
+
+  it("calculates Amex funded and unfunded exposure from a reserved pocket", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_test",
+      name: "Amex Platinum Cashback Credit Card",
+      institutionName: "American Express",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: -300,
+      balanceAvailable: true,
+      includeInSafeToSpend: false,
+    } satisfies Account;
+    const pocket = {
+      ...mockAccounts[0],
+      id: "acct_revolut_amex_pocket",
+      name: "AMEX",
+      institutionName: "Revolut",
+      type: "savings",
+      subtype: "pocket",
+      purpose: "pocket",
+      balance: 225,
+      reservedFor: "amex",
+      includeInSafeToSpend: false,
+      includeInNetWorth: true,
+    } satisfies Account;
+
+    expect(amexFundingSummary([amex, pocket])).toMatchObject({
+      liabilityAccountId: amex.id,
+      balanceKnown: true,
+      liabilityBalance: 300,
+      linkedPocketBalance: 225,
+      fundedAmount: 225,
+      unfundedAmount: 75,
+    });
+  });
+
+  it("does not treat unavailable Amex balance as confirmed zero", () => {
+    const amex = {
+      ...mockAccounts[0],
+      id: "acct_amex_unknown",
+      name: "Amex Platinum Cashback Credit Card",
+      institutionName: "American Express",
+      type: "credit_card",
+      subtype: "credit_card",
+      purpose: "credit_card",
+      balance: 0,
+      balanceAvailable: false,
+      balanceUnavailableReason: "provider_balance_unavailable",
+      includeInSafeToSpend: false,
+    } satisfies Account;
+
+    expect(amexFundingSummary([amex])).toMatchObject({
+      liabilityAccountId: amex.id,
+      balanceKnown: false,
+      liabilityBalance: null,
+      unfundedAmount: null,
+    });
   });
 
   it("projects month-end balance from cash, income, and outflows", () => {

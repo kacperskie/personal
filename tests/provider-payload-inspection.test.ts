@@ -150,7 +150,8 @@ describe("provider payload inspection and Moneyhub mapper hardening", () => {
     expect(nationwideCurrent.purpose).toBe("main_current_account");
     expect(nationwideSavings.purpose).toBe("emergency_fund");
     expect(revolutCurrent.purpose).toBe("everyday_spending");
-    expect(revolutPocket.purpose).toBe("short_term_savings");
+    expect(revolutPocket.purpose).toBe("pocket");
+    expect(revolutPocket.includeInSafeToSpend).toBe(false);
   });
 
   it("maps representative Moneyhub transaction fixtures into canonical provider transactions", () => {

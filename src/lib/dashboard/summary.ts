@@ -18,6 +18,7 @@ import type {
   SavingsGoal,
   Subscription,
   Transaction,
+  TransactionBudgetOverride,
   UserProfile,
 } from "@/lib/domain";
 import type { BudgetHealthItem, DebtSummary, UpcomingCommitment } from "@/lib/finance";
@@ -78,6 +79,10 @@ import {
   sandboxConnectionIdSet,
 } from "@/lib/bank-providers/sandbox-data";
 import {
+  amexFundingSummary,
+  exclusionCountsByReason,
+} from "@/lib/finance-interpretation";
+import {
   type FirebaseAuthenticatedContext,
   getFirebaseAuthenticatedContext,
   getFirebaseCollectionForContext,
@@ -115,10 +120,32 @@ export type CreditCardFundingSummary = {
   liabilityAccountId: string;
   liabilityName: string;
   balance: number;
+  balanceKnown: boolean;
+  balanceUnavailableReason: string | null;
   reservedBalance: number;
   fundedBalance: number;
   unfundedBalance: number;
   reservedAccountIds: string[];
+};
+
+export type DashboardDiagnostics = {
+  safeToSpendIncludedAccounts: Array<{ id: string; name: string; balance: number }>;
+  safeToSpendExcludedAccounts: Array<{ id: string; name: string; purpose: string; balance: number }>;
+  billsAccountBalance: number;
+  billsDueBeforePayday: number;
+  reservedPockets: Array<{ id: string; name: string; reservedFor: string | null; balance: number }>;
+  linkedAmexPocketBalance: number;
+  creditCardLiabilities: Array<{
+    id: string;
+    name: string;
+    balance: number;
+    balanceKnown: boolean;
+    warning: string | null;
+  }>;
+  overdraftAccounts: Array<{ id: string; name: string; overdraftUsed: number; overdraftLimit: number | null }>;
+  transactionsExcludedFromWeeklyBudget: number;
+  transactionsExcludedFromMonthlyBudget: number;
+  exclusionsByReason: Record<string, number>;
 };
 
 export type DashboardSummaryData = {
@@ -137,6 +164,7 @@ export type DashboardSummaryData = {
   budgetPeriods: BudgetPeriod[];
   categories: Category[];
   bankConnections: BankConnection[];
+  transactionBudgetOverrides: TransactionBudgetOverride[];
 };
 
 export type DashboardSource = "firebase" | "mock" | "firebase_fallback";
@@ -158,7 +186,9 @@ export type DashboardReadyModel = {
     paydayPlans: number;
     overdraftPlans: number;
     bankConnections: number;
+    transactionBudgetOverrides: number;
   };
+  diagnostics: DashboardDiagnostics;
   warnings: string[];
   fallbackReason: string | null;
 };
@@ -279,13 +309,21 @@ function userDataPresent(data: DashboardSummaryData) {
 }
 
 function dashboardWarnings(data: DashboardSummaryData) {
-  return data.bankConnections
+  const syncWarnings = data.bankConnections
     .filter((connection) => connection.status === "sync_failed")
     .map((connection) =>
       connection.errorMessage
         ? `${connection.institutionName} sync failed: ${connection.errorMessage}`
         : `${connection.institutionName} sync failed. Last known data is still shown.`,
     );
+  const cardWarnings = data.accounts
+    .filter((account) => account.type === "credit_card" && account.balanceAvailable === false)
+    .map(
+      (account) =>
+        `${account.name} balance unavailable from provider; debt and Amex funding may be understated.`,
+    );
+
+  return [...syncWarnings, ...cardWarnings];
 }
 
 function nextDebtDue(
@@ -351,6 +389,7 @@ function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSumma
               liabilityText.includes("american express"))),
       );
       const balance = Math.abs(Math.min(liability.balance, 0));
+      const balanceKnown = liability.balanceAvailable !== false;
       const reservedBalance = matchingReserved.reduce((total, account) => total + account.balance, 0);
       const fundedBalance = Math.min(balance, reservedBalance);
 
@@ -358,13 +397,99 @@ function creditCardFundingSummaries(accounts: Account[]): CreditCardFundingSumma
         liabilityAccountId: liability.id,
         liabilityName: liability.name,
         balance,
+        balanceKnown,
+        balanceUnavailableReason: liability.balanceUnavailableReason ?? null,
         reservedBalance,
         fundedBalance,
         unfundedBalance: Math.max(balance - reservedBalance, 0),
         reservedAccountIds: matchingReserved.map((account) => account.id),
       };
     })
-    .filter((summary) => summary.balance > 0 || summary.reservedBalance > 0);
+    .filter(
+      (summary) => summary.balance > 0 || summary.reservedBalance > 0 || !summary.balanceKnown,
+    );
+}
+
+function dashboardDiagnostics(
+  data: DashboardSummaryData,
+  billsAccount: BillsAccountSummary,
+  asOfDate: string,
+  nextPaydayDate: string,
+): DashboardDiagnostics {
+  const weeklyExclusions = exclusionCountsByReason(
+    data.transactions,
+    data.accounts,
+    data.transactionBudgetOverrides,
+    "weekly",
+  );
+  const monthlyExclusions = exclusionCountsByReason(
+    data.transactions,
+    data.accounts,
+    data.transactionBudgetOverrides,
+    "monthly",
+  );
+  const amex = amexFundingSummary(data.accounts);
+  const billsDueBeforePayday = calculateBillsDueBeforePayday(
+    data.bills,
+    data.subscriptions,
+    data.manualFinanceItems,
+    asOfDate,
+    nextPaydayDate,
+  );
+
+  return {
+    safeToSpendIncludedAccounts: data.accounts
+      .filter((account) => account.includeInSafeToSpend && account.status === "active")
+      .map((account) => ({ id: account.id, name: account.name, balance: account.balance })),
+    safeToSpendExcludedAccounts: data.accounts
+      .filter((account) => !account.includeInSafeToSpend && account.status === "active")
+      .map((account) => ({
+        id: account.id,
+        name: account.name,
+        purpose: account.purpose,
+        balance: account.balance,
+      })),
+    billsAccountBalance: billsAccount.billsAccountBalance,
+    billsDueBeforePayday,
+    reservedPockets: data.accounts
+      .filter((account) => account.purpose === "pocket" && account.status === "active")
+      .map((account) => ({
+        id: account.id,
+        name: account.name,
+        reservedFor: account.reservedFor ?? null,
+        balance: account.balance,
+      })),
+    linkedAmexPocketBalance: amex.linkedPocketBalance,
+    creditCardLiabilities: data.accounts
+      .filter((account) => account.type === "credit_card" && account.status === "active")
+      .map((account) => ({
+        id: account.id,
+        name: account.name,
+        balance: Math.abs(Math.min(account.balance, 0)),
+        balanceKnown: account.balanceAvailable !== false,
+        warning:
+          account.balanceAvailable === false
+            ? "Balance unavailable from provider"
+            : null,
+      })),
+    overdraftAccounts: data.accounts
+      .filter((account) => account.purpose === "overdraft_account" && account.status === "active")
+      .map((account) => ({
+        id: account.id,
+        name: account.name,
+        overdraftUsed: Math.abs(Math.min(account.balance, 0)),
+        overdraftLimit: account.overdraftLimit ?? account.creditLimit ?? null,
+      })),
+    transactionsExcludedFromWeeklyBudget: Object.values(weeklyExclusions).reduce(
+      (total, count) => total + count,
+      0,
+    ),
+    transactionsExcludedFromMonthlyBudget: Object.values(monthlyExclusions).reduce(
+      (total, count) => total + count,
+      0,
+    ),
+    exclusionsByReason: weeklyExclusions,
+  };
 }
 
 export function buildDashboardSummaryFromData(
@@ -392,11 +517,13 @@ export function buildDashboardSummaryFromData(
     asOfDate,
     nextPaydayDate,
   );
+  const amexFunding = amexFundingSummary(data.accounts);
+  const unfundedAmexExposure = amexFunding.unfundedAmount ?? 0;
   const safeToSpend = calculateSafeToSpendAmount({
     currentCash: safeToSpendEligibleCash,
     billsDueBeforePayday,
     plannedSavingsBeforePayday,
-    debtPaymentsBeforePayday,
+    debtPaymentsBeforePayday: debtPaymentsBeforePayday + unfundedAmexExposure,
     minimumBuffer: data.profile.minimumBuffer,
     reservedGoalContributions: 0,
   });
@@ -423,6 +550,8 @@ export function buildDashboardSummaryFromData(
     data.categories,
     period,
     ratio,
+    data.accounts,
+    data.transactionBudgetOverrides,
   );
   const billsAccount = summariseBillsAccount(
     data.accounts,
@@ -521,6 +650,8 @@ export function buildDashboardSummaryFromData(
         data.transactions,
         data.manualFinanceItems,
         period,
+        data.accounts,
+        data.transactionBudgetOverrides,
       ),
       projectedMonthEndBalance: calculateProjectedMonthEndBalance({
         currentCash,
@@ -562,7 +693,9 @@ export function buildDashboardSummaryFromData(
       paydayPlans: data.paydayPlans.length,
       overdraftPlans: data.overdraftPlans.length,
       bankConnections: data.bankConnections.length,
+      transactionBudgetOverrides: data.transactionBudgetOverrides.length,
     },
+    diagnostics: dashboardDiagnostics(data, billsAccount, asOfDate, nextPaydayDate),
     warnings: dashboardWarnings(data),
   };
 }
@@ -584,6 +717,7 @@ function mockData(): DashboardSummaryData {
     budgetPeriods: mockBudgetPeriods,
     categories: mockCategories,
     bankConnections: [],
+    transactionBudgetOverrides: [],
   };
 }
 
@@ -601,6 +735,7 @@ function buildMockDashboardModel(source: "mock" | "firebase_fallback", reason: s
     budgetHealth: mockBudgetHealth,
     upcomingBills: mockUpcomingBills,
     dataCounts: computed.dataCounts,
+    diagnostics: computed.diagnostics,
     warnings: [],
     fallbackReason: reason,
   } satisfies DashboardReadyModel;
@@ -623,6 +758,7 @@ export async function readFirebaseDashboardDataForContext(
     budgetPeriods,
     categories,
     bankConnections,
+    transactionBudgetOverrides,
   ] = await Promise.all([
     getFirebaseCollectionForContext(context, "accounts"),
     getFirebaseCollectionForContext(context, "bills"),
@@ -637,6 +773,7 @@ export async function readFirebaseDashboardDataForContext(
     getFirebaseCollectionForContext(context, "budgetPeriods"),
     getFirebaseCollectionForContext(context, "categories"),
     getFirebaseCollectionForContext(context, "bankConnections"),
+    getFirebaseCollectionForContext(context, "transactionBudgetOverrides"),
   ]);
   const userSnapshot = await context.db.doc(`users/${context.userId}`).get();
   const profile = userSnapshot.exists
@@ -659,6 +796,9 @@ export async function readFirebaseDashboardDataForContext(
     budgetPeriods: budgetPeriods.filter((record) => isCurrentUserRecord(record, context.userId)),
     categories: categories.filter((record) => isCurrentUserRecord(record, context.userId)),
     bankConnections: bankConnections.filter((record) =>
+      isCurrentUserRecord(record, context.userId),
+    ),
+    transactionBudgetOverrides: transactionBudgetOverrides.filter((record) =>
       isCurrentUserRecord(record, context.userId),
     ),
   };
@@ -723,6 +863,9 @@ export function applyLiveModeDashboardFilter(
     accounts: liveAccounts,
     transactions: data.transactions.filter((transaction) =>
       liveAccountIds.has(transaction.accountId),
+    ),
+    transactionBudgetOverrides: data.transactionBudgetOverrides.filter((override) =>
+      liveAccountIds.has(override.accountId),
     ),
     bankConnections: data.bankConnections.filter(
       (connection) => !isSandboxConnection(connection),

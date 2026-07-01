@@ -109,12 +109,15 @@ describe("phase 5 notifications and PWA", () => {
   it("creates notification preference defaults", () => {
     const preferences = createDefaultNotificationPreferences("user_test", "2026-06-30T00:00:00.000Z");
 
-    expect(preferences).toHaveLength(27);
+    expect(preferences).toHaveLength(35);
     expect(preferences.every((preference) => preference.channels.includes("in_app"))).toBe(
       true,
     );
     expect(preferences[0].lowBalanceThreshold).toBe(250);
     expect(preferences[0].budgetWarningPercentage).toBe(0.85);
+    expect(
+      preferences.find((preference) => preference.type === "amex_pocket_underfunded")?.enabled,
+    ).toBe(false);
   });
 
   it("detects quiet hours across midnight", () => {

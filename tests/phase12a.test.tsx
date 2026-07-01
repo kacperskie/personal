@@ -136,11 +136,21 @@ function truelayerClient(overrides: Partial<TrueLayerClientLike> = {}): TrueLaye
         currency: "GBP",
       },
       {
-        account_id: "tl_card_amex",
+        card_id: "tl_card_amex",
         current: 250,
         available: 1750,
         credit_limit: 2000,
         currency: "GBP",
+      },
+    ]),
+    getCardBalances: vi.fn(async () => [
+      {
+        card_id: "tl_card_amex",
+        current: 250,
+        available: 1750,
+        credit_limit: 2000,
+        currency: "GBP",
+        balanceAvailable: true,
       },
     ]),
     getTransactions: vi.fn(async (query) => [
@@ -274,7 +284,15 @@ describe("phase 12A TrueLayer provider comparison", () => {
         currency: "GBP",
         provider: { display_name: "American Express", provider_id: "amex" },
       },
-      [{ account_id: "tl_amex", current: 200, available: 1800, credit_limit: 2000 }],
+      [
+        {
+          card_id: "tl_amex",
+          current: 200,
+          available: 1800,
+          credit_limit: 2000,
+          balanceAvailable: true,
+        },
+      ],
     );
 
     expect(current.providerAccountId).toBe("tl_current");
@@ -282,6 +300,8 @@ describe("phase 12A TrueLayer provider comparison", () => {
     expect(current.availableBalance).toBe(450);
     expect(card.type).toBe("credit_card");
     expect(card.creditLimit).toBe(2000);
+    expect(card.balanceAvailable).toBe(true);
+    expect(card.balanceDiagnostics?.mappedAsLiability).toBe(true);
   });
 
   it("maps TrueLayer transaction payloads into canonical transaction payloads", () => {

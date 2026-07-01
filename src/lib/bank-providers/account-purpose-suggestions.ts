@@ -27,6 +27,14 @@ function textFor(account: ProviderAccount) {
   return `${account.institutionName} ${account.institutionId} ${account.name} ${account.officialName} ${account.type} ${account.subtype}`.toLowerCase();
 }
 
+function isRevolut(account: ProviderAccount, text: string) {
+  return text.includes("revolut") || account.institutionName.toLowerCase().includes("revolut");
+}
+
+function isAmexText(text: string) {
+  return text.includes("amex") || text.includes("american express");
+}
+
 function defaultRoleForType(type: AccountType): AccountRole {
   if (type === "credit_card") return "credit";
   if (type === "loan") return "loan";
@@ -88,16 +96,38 @@ export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeS
   const text = textFor(account);
   const base = baseSuggestion(account);
 
-  if (account.subtype === "pocket") {
+  if (
+    isRevolut(account, text) &&
+    isAmexText(text) &&
+    account.type !== "credit_card"
+  ) {
+    return purposeSuggestion("pocket", "Revolut AMEX pockets are reserved cash, not credit cards.", {
+      reservedFor: "amex",
+    });
+  }
+
+  if (text.includes("bill")) {
+    return purposeSuggestion(
+      "bills_account",
+      "Bills-style accounts are excluded from safe-to-spend by default.",
+    );
+  }
+
+  if (
+    account.subtype === "pocket" ||
+    text.includes("pocket") ||
+    text.includes("vault") ||
+    text.includes("space") ||
+    text.includes(" pot ")
+  ) {
     return purposeSuggestion("pocket", "Pockets hold reserved money and are excluded from safe-to-spend.", {
-      reservedFor: text.includes("amex") || text.includes("american express") ? "amex" : null,
+      reservedFor: isAmexText(text) ? "amex" : null,
     });
   }
 
   if (
     account.type === "credit_card" ||
-    text.includes("american express") ||
-    text.includes("amex")
+    (!isRevolut(account, text) && isAmexText(text))
   ) {
     return purposeSuggestion(
       "credit_card",
@@ -110,6 +140,7 @@ export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeS
     (account.balance < 0 ||
       text.includes("overdraft") ||
       text.includes("graduate") ||
+      text.includes("flexgraduate") ||
       text.includes("grad account"))
   ) {
     return purposeSuggestion(
@@ -129,13 +160,6 @@ export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeS
       );
     }
 
-    if (text.includes("bill")) {
-      return purposeSuggestion(
-        "bills_account",
-        "Nationwide bills-style accounts are excluded from safe-to-spend by default.",
-      );
-    }
-
     return purposeSuggestion(
       "main_current_account",
       "Nationwide current accounts are suggested as main current accounts.",
@@ -145,8 +169,8 @@ export function suggestAccountPurpose(account: ProviderAccount): AccountPurposeS
   if (text.includes("revolut")) {
     if (account.type === "savings" || account.subtype === "vault") {
       return purposeSuggestion(
-        "short_term_savings",
-        "Revolut vault-like balances are treated as short-term savings.",
+        "pocket",
+        "Revolut vault-like balances are reserved pockets and excluded from safe-to-spend.",
       );
     }
 

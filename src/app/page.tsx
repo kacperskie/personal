@@ -237,11 +237,19 @@ export default async function DashboardPage() {
         />
         {amexFunding ? (
           <StatCard
-            label="Amex funded balance"
-            value={formatCurrency(amexFunding.fundedBalance)}
-            detail={`${formatCurrency(amexFunding.unfundedBalance)} unfunded after reserved pocket cash`}
+            label={amexFunding.balanceKnown ? "Amex funded balance" : "Amex balance unavailable"}
+            value={
+              amexFunding.balanceKnown
+                ? formatCurrency(amexFunding.fundedBalance)
+                : "Provider unavailable"
+            }
+            detail={
+              amexFunding.balanceKnown
+                ? `${formatCurrency(amexFunding.unfundedBalance)} unfunded after reserved pocket cash`
+                : "Cannot calculate funded exposure until TrueLayer returns the card balance"
+            }
             icon={WalletCards}
-            tone={amexFunding.unfundedBalance > 0 ? "saffron" : "moss"}
+            tone={!amexFunding.balanceKnown || amexFunding.unfundedBalance > 0 ? "saffron" : "moss"}
           />
         ) : null}
         <StatCard
@@ -378,6 +386,84 @@ export default async function DashboardPage() {
             </div>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-panel">
+        <div className="mb-5">
+          <h2 className="text-lg font-semibold text-ink">Budget and account diagnostics</h2>
+          <p className="text-sm text-ink/60">
+            What is included or excluded from the live safe-to-spend calculation.
+          </p>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="rounded-lg border border-line bg-paper p-4">
+            <p className="text-sm font-semibold text-ink">Included in safe-to-spend</p>
+            <div className="mt-3 space-y-2 text-sm text-ink/70">
+              {dashboard.diagnostics.safeToSpendIncludedAccounts.length > 0 ? (
+                dashboard.diagnostics.safeToSpendIncludedAccounts.map((account) => (
+                  <p key={account.id} className="flex justify-between gap-3">
+                    <span>{account.name}</span>
+                    <span className="font-semibold text-ink">{formatCurrency(account.balance)}</span>
+                  </p>
+                ))
+              ) : (
+                <p>No accounts are currently spendable.</p>
+              )}
+            </div>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-4">
+            <p className="text-sm font-semibold text-ink">Ringfenced and excluded</p>
+            <div className="mt-3 space-y-2 text-sm text-ink/70">
+              {dashboard.diagnostics.safeToSpendExcludedAccounts.slice(0, 8).map((account) => (
+                <p key={account.id} className="flex justify-between gap-3">
+                  <span>{account.name} - {account.purpose.replaceAll("_", " ")}</span>
+                  <span className="font-semibold text-ink">{formatCurrency(account.balance)}</span>
+                </p>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-lg border border-line bg-paper p-4">
+            <p className="text-sm font-semibold text-ink">Warnings and exclusions</p>
+            <dl className="mt-3 grid gap-2 text-sm text-ink/70">
+              <div className="flex justify-between gap-3">
+                <dt>Bills due before payday</dt>
+                <dd className="font-semibold text-ink">
+                  {formatCurrency(dashboard.diagnostics.billsDueBeforePayday)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Amex pocket reserved</dt>
+                <dd className="font-semibold text-ink">
+                  {formatCurrency(dashboard.diagnostics.linkedAmexPocketBalance)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Weekly exclusions</dt>
+                <dd className="font-semibold text-ink">
+                  {dashboard.diagnostics.transactionsExcludedFromWeeklyBudget}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt>Monthly exclusions</dt>
+                <dd className="font-semibold text-ink">
+                  {dashboard.diagnostics.transactionsExcludedFromMonthlyBudget}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+        {dashboard.diagnostics.creditCardLiabilities.some((card) => !card.balanceKnown) ? (
+          <div className="mt-4 rounded-lg border border-saffron/30 bg-saffron/10 p-4 text-sm text-ink/75">
+            {dashboard.diagnostics.creditCardLiabilities
+              .filter((card) => !card.balanceKnown)
+              .map((card) => (
+                <p key={card.id}>
+                  {card.name}: balance unavailable from provider. The dashboard is not treating this
+                  as a confirmed GBP 0 liability.
+                </p>
+              ))}
+          </div>
+        ) : null}
       </section>
     </div>
   );

@@ -227,7 +227,8 @@ describe("phase 7 Moneyhub sandbox proof of concept", () => {
     expect(suggestAccountPurpose(amex).includeInSafeToSpend).toBe(false);
     expect(suggestAccountPurpose(nationwide).purpose).toBe("bills_account");
     expect(suggestAccountPurpose(nationwide).includeInSafeToSpend).toBe(false);
-    expect(suggestAccountPurpose(revolut).purpose).toBe("short_term_savings");
+    expect(suggestAccountPurpose(revolut).purpose).toBe("pocket");
+    expect(suggestAccountPurpose(revolut).includeInSafeToSpend).toBe(false);
   });
 
   it("sync workflow uses Moneyhub accounts and transactions without duplicating repeat syncs", async () => {

@@ -54,6 +54,7 @@ users/{userId}/savingsGoals/{goalId}
 users/{userId}/spendingAnomalies/{anomalyId}
 users/{userId}/subscriptions/{subscriptionId}
 users/{userId}/transactionEnrichments/{enrichmentId}
+users/{userId}/transactionBudgetOverrides/{overrideId}
 users/{userId}/transactions/{transactionId}
 users/{userId}/auditLog/{auditEventId}
 ```
@@ -105,6 +106,19 @@ Reserved pockets may set `reservedFor` (for example `amex`) or
 `linkedLiabilityAccountId`; overdraft accounts may set `overdraftLimit` and
 `overdraftRepaymentTarget`. Overdraft limits and card available credit are never
 counted as cash.
+
+Card accounts can also store provider balance-trust fields:
+`balanceAvailable`, `balanceUnavailableReason`, and `balanceDiagnostics`.
+These fields prevent unavailable card balances from being displayed as a
+confirmed GBP 0 liability. TrueLayer card balances are read from
+`/data/v1/cards/{card_id}/balance`, not the normal account balance endpoint.
+
+Transaction budget inclusion decisions are stored separately from synced
+provider transactions under `transactionBudgetOverrides`. Each override links to
+the user-owned transaction and account and can set weekly/monthly budget
+inclusion, spending-summary inclusion, safe-to-spend impact, budget category,
+exclusion reason, and an optional user note. Raw provider transaction records
+are not mutated for budget choices.
 
 ## Spreadsheet Tracker Onboarding
 

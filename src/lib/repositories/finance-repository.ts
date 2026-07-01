@@ -19,6 +19,7 @@ import type {
   TransactionEnrichment,
   CashflowEvent,
   Transaction,
+  TransactionBudgetOverride,
   UserProfile,
 } from "@/lib/domain";
 import {
@@ -103,6 +104,7 @@ const fallbackRecurringCandidates = new Map<string, RecurringPaymentCandidate>()
 const fallbackDetectedBills = new Map<string, DetectedBill>();
 const fallbackDetectedSubscriptions = new Map<string, DetectedSubscription>();
 const fallbackEnrichments = new Map<string, TransactionEnrichment>();
+const fallbackTransactionBudgetOverrides = new Map<string, TransactionBudgetOverride>();
 const fallbackAIInsights = new Map<string, AIInsight>(
   mockAIInsights.map((insight) => [insight.id, insight]),
 );
@@ -220,7 +222,30 @@ export async function getUserProfile(): Promise<UserProfile> {
 
 export async function upsertAccount(account: Account): Promise<Account> {
   if (isFirebaseBackend()) {
-    return upsertFirebaseDocument("accounts", account);
+    const existing = await getFirebaseDocument("accounts", account.id);
+    const merged = existing
+      ? {
+          ...account,
+          purpose: existing.purpose,
+          accountRole: existing.accountRole,
+          includeInSafeToSpend: existing.includeInSafeToSpend,
+          includeInCashflow: existing.includeInCashflow,
+          includeInNetWorth: existing.includeInNetWorth,
+          isSpendingAccount: existing.isSpendingAccount,
+          isBillsAccount: existing.isBillsAccount,
+          isSavingsAccount: existing.isSavingsAccount,
+          linkedGoalIds: existing.linkedGoalIds,
+          reservedFor: existing.reservedFor ?? account.reservedFor ?? null,
+          linkedLiabilityAccountId:
+            existing.linkedLiabilityAccountId ?? account.linkedLiabilityAccountId ?? null,
+          overdraftLimit: existing.overdraftLimit ?? account.overdraftLimit ?? null,
+          overdraftRepaymentTarget:
+            existing.overdraftRepaymentTarget ?? account.overdraftRepaymentTarget ?? null,
+          notes: existing.notes ?? account.notes,
+          createdAt: existing.createdAt,
+        }
+      : account;
+    return upsertFirebaseDocument("accounts", merged);
   }
 
   const context = await getAuthenticatedContext();
@@ -835,6 +860,44 @@ export async function getTransactions(): Promise<Transaction[]> {
   }
 
   return data.map(transactionFromRow);
+}
+
+export async function getTransactionBudgetOverrides(): Promise<TransactionBudgetOverride[]> {
+  if (isFirebaseBackend()) {
+    return getFirebaseCollection("transactionBudgetOverrides", []);
+  }
+
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    return Array.from(fallbackTransactionBudgetOverrides.values());
+  }
+
+  return [];
+}
+
+export async function upsertTransactionBudgetOverride(
+  override: TransactionBudgetOverride,
+): Promise<TransactionBudgetOverride> {
+  const updated = { ...override, updatedAt: new Date().toISOString() };
+
+  if (isFirebaseBackend()) {
+    return upsertFirebaseDocument("transactionBudgetOverrides", updated);
+  }
+
+  const context = await getAuthenticatedContext();
+
+  if (!context) {
+    fallbackTransactionBudgetOverrides.set(updated.id, updated);
+  }
+
+  return updated;
+}
+
+export async function upsertTransactionBudgetOverrides(
+  overrides: TransactionBudgetOverride[],
+): Promise<TransactionBudgetOverride[]> {
+  return Promise.all(overrides.map((override) => upsertTransactionBudgetOverride(override)));
 }
 
 export async function getCategories(): Promise<Category[]> {

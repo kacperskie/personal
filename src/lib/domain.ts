@@ -122,6 +122,18 @@ export type Account = {
   subtype: AccountSubtype;
   currency: CurrencyCode;
   balance: number;
+  /** True only when the provider returned a real balance value. False prevents fake GBP0 card debt. */
+  balanceAvailable?: boolean;
+  balanceUnavailableReason?: string | null;
+  balanceDiagnostics?: {
+    endpointCalled?: boolean;
+    status?: number | null;
+    balanceValuePresent?: boolean;
+    availableCreditPresent?: boolean;
+    currentBalancePresent?: boolean;
+    mappedAsLiability?: boolean;
+    providerReason?: string | null;
+  } | null;
   availableBalance: number | null;
   creditLimit: number | null;
   mask: string | null;
@@ -234,6 +246,9 @@ export type ProviderAccount = {
   type: AccountType;
   subtype: AccountSubtype;
   balance: number;
+  balanceAvailable?: boolean;
+  balanceUnavailableReason?: string | null;
+  balanceDiagnostics?: Account["balanceDiagnostics"];
   availableBalance: number | null;
   creditLimit: number | null;
   currency: CurrencyCode;
@@ -255,6 +270,35 @@ export type ProviderTransaction = {
   pending: boolean;
   category: string | null;
   isOwnAccountTransfer: boolean;
+};
+
+export type TransactionBudgetExclusionReason =
+  | "internal_transfer"
+  | "credit_card_payment"
+  | "amex_pocket_transfer"
+  | "bill"
+  | "rent"
+  | "savings_transfer"
+  | "debt_payment"
+  | "refund"
+  | "exceptional"
+  | "ignored"
+  | "other";
+
+export type TransactionBudgetOverride = {
+  id: string;
+  userId: string;
+  transactionId: string;
+  accountId: string;
+  includeInWeeklyBudget: boolean;
+  includeInMonthlyBudget: boolean;
+  includeInSpendingSummaries: boolean;
+  includeInSafeToSpendImpact: boolean;
+  budgetCategory?: string | null;
+  exclusionReason?: TransactionBudgetExclusionReason | null;
+  userNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ProviderSyncEvent = {
@@ -747,7 +791,15 @@ export type NotificationType =
   | "openai_not_configured"
   | "payday_planning"
   | "manual_item_review"
-  | "safe_to_spend_change";
+  | "safe_to_spend_change"
+  | "weekly_spending_summary"
+  | "monthly_spending_summary"
+  | "category_overspend"
+  | "safe_to_spend_drop"
+  | "bills_account_shortfall"
+  | "overdraft_risk"
+  | "overdraft_repayment_reminder"
+  | "amex_pocket_underfunded";
 
 export type NotificationChannel = "in_app" | "web_push" | "email_placeholder";
 
@@ -765,6 +817,14 @@ export type NotificationPreference = {
   lowBalanceThreshold: number;
   budgetWarningPercentage: number;
   billReminderDays: number;
+  weeklySummaryDay?: number | null;
+  excludedCategories?: string[];
+  excludedAccounts?: string[];
+  largeTransactionThreshold?: number | null;
+  unusualSpendingSensitivity?: "low" | "medium" | "high";
+  notifyWhenAmexPocketUnderfunded?: boolean;
+  notifyWhenBillsAccountShortfallExists?: boolean;
+  notifyWhenOverdraftPositionWorsens?: boolean;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
   createdAt: string;

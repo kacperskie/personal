@@ -35,10 +35,14 @@ import { logServerEvent } from "@/lib/observability/server-logger";
 
 export type TrueLayerBalancePayload = {
   account_id?: string;
+  card_id?: string;
   currency?: string;
   current?: number;
   available?: number;
   credit_limit?: number;
+  balanceAvailable?: boolean;
+  status?: number | null;
+  providerReason?: string | null;
 };
 
 type TrueLayerFetchOptions = {
@@ -63,6 +67,7 @@ export type TrueLayerClientLike = {
   getAccounts(input: ProviderRequestContext): Promise<unknown[]>;
   getCards?(input: ProviderRequestContext): Promise<unknown[]>;
   getBalances?(input: ProviderRequestContext): Promise<TrueLayerBalancePayload[]>;
+  getCardBalances?(input: ProviderRequestContext): Promise<TrueLayerBalancePayload[]>;
   getTransactions(input: TransactionQuery): Promise<unknown[]>;
   revokeConnection(input: ProviderRequestContext): Promise<void>;
 };
@@ -418,6 +423,62 @@ async function defaultTrueLayerClientFactory(
 
       return balances.flat();
     },
+    async getCardBalances(input) {
+      const context = requireProviderContext(input) as ProviderRequestContext;
+      const cardIds = context.providerAccountIds ?? [];
+      const balances = await Promise.all(
+        cardIds.map(async (cardId: string) => {
+          try {
+            const rows = await fetchTrueLayer(
+              new Request(`${config.apiBaseUrl}/data/v1/cards/${cardId}/balance`, {
+                headers: { authorization: `Bearer ${context.tokenReference}` },
+              }),
+              {
+                endpoint: "balance",
+                scopes: config.scopes,
+                mode: config.mode,
+                pathTemplate: "/data/v1/cards/{card_id}/balance",
+              },
+            );
+
+            return rows.map((row) => ({
+              ...(row as TrueLayerBalancePayload),
+              card_id: cardId,
+              balanceAvailable: true,
+              status: 200,
+              providerReason: null,
+            }));
+          } catch (error) {
+            const safeReason =
+              error instanceof ProviderSafeError
+                ? error.safeReason ?? error.code
+                : "truelayer_card_balance_unavailable";
+
+            logServerEvent({
+              level: "warn",
+              event: "provider_sync_event",
+              message: "TrueLayer card balance unavailable.",
+              metadata: {
+                endpoint: "balance",
+                pathTemplate: "/data/v1/cards/{card_id}/balance",
+                reason: safeReason,
+              },
+            });
+
+            return [
+              {
+                card_id: cardId,
+                balanceAvailable: false,
+                status: error instanceof ProviderSafeError ? error.status : null,
+                providerReason: safeReason,
+              } satisfies TrueLayerBalancePayload,
+            ];
+          }
+        }),
+      );
+
+      return balances.flat();
+    },
     async getTransactions(input) {
       const context = requireProviderContext(input);
       const accountId = input.providerAccountId;
@@ -463,7 +524,10 @@ function balanceForAccount(
   accountId: string | undefined,
   balances: TrueLayerBalancePayload[],
 ): TrueLayerBalancePayload | null {
-  return balances.find((balance) => balance.account_id === accountId) ?? null;
+  return (
+    balances.find((balance) => balance.account_id === accountId || balance.card_id === accountId) ??
+    null
+  );
 }
 
 export function truelayerAccountPayload(
@@ -491,6 +555,20 @@ export function truelayerAccountPayload(
   const providerAccountId = payload.account_id ?? payload.card_id;
   const balance = balanceForAccount(providerAccountId, balances);
   const isCard = Boolean(payload.card_id) || payload.account_type === "CREDIT_CARD";
+  const currentBalancePresent =
+    typeof balance?.current === "number" ||
+    typeof payload.current_balance === "number" ||
+    typeof payload.balance?.current === "number";
+  const availableCreditPresent =
+    typeof balance?.available === "number" ||
+    typeof payload.available_balance === "number" ||
+    typeof payload.balance?.available === "number" ||
+    typeof balance?.credit_limit === "number" ||
+    typeof payload.credit_limit === "number" ||
+    typeof payload.balance?.credit_limit === "number";
+  const balanceAvailable = isCard
+    ? Boolean(balance?.balanceAvailable && currentBalancePresent)
+    : currentBalancePresent || typeof balance?.available === "number";
 
   return {
     id: providerAccountId,
@@ -504,6 +582,17 @@ export function truelayerAccountPayload(
     type: isCard ? "credit_card" : payload.account_type,
     accountType: isCard ? "credit_card" : payload.account_type,
     balance: balance?.current ?? payload.current_balance ?? payload.balance?.current ?? 0,
+    balanceAvailable,
+    balanceUnavailableReason: balanceAvailable ? null : "provider_balance_unavailable",
+    balanceDiagnostics: {
+      endpointCalled: isCard ? Boolean(balance) : true,
+      status: balance?.status ?? null,
+      balanceValuePresent: currentBalancePresent,
+      availableCreditPresent,
+      currentBalancePresent,
+      mappedAsLiability: isCard && balanceAvailable,
+      providerReason: balance?.providerReason ?? null,
+    },
     availableBalance: balance?.available ?? payload.available_balance ?? payload.balance?.available,
     creditLimit: balance?.credit_limit ?? payload.credit_limit ?? payload.balance?.credit_limit ?? null,
     currency: payload.currency ?? balance?.currency,
@@ -844,13 +933,31 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     const accountIds = rawAccounts
       .map((account) => (account as { account_id?: string }).account_id)
       .filter(Boolean) as string[];
+    const cardIds = rawCards
+      .map((card) => (card as { card_id?: string }).card_id)
+      .filter(Boolean) as string[];
     const balances = client.getBalances
       ? await client.getBalances({
           ...providerContext,
           providerAccountIds: accountIds,
         })
       : [];
+    const cardBalances = client.getCardBalances
+      ? await client.getCardBalances({
+          ...providerContext,
+          providerAccountIds: cardIds,
+        })
+      : cardIds.map(
+          (cardId) =>
+            ({
+              card_id: cardId,
+              balanceAvailable: false,
+              status: null,
+              providerReason: "card_balance_endpoint_not_configured",
+            }) satisfies TrueLayerBalancePayload,
+        );
     const allAccounts = [...rawAccounts, ...rawCards];
+    const allBalances = [...balances, ...cardBalances];
 
     await captureProviderPayloadInspection({
       provider: "truelayer",
@@ -860,7 +967,7 @@ export class TrueLayerProvider implements OpenBankingProviderAdapter {
     });
 
     return allAccounts.map((account) =>
-      mapProviderAccountPayload(truelayerAccountPayload(account, balances), {
+      mapProviderAccountPayload(truelayerAccountPayload(account, allBalances), {
         id: connectionId,
         institutionId:
           (account as { provider?: { provider_id?: string } }).provider?.provider_id ??

@@ -166,6 +166,7 @@ function liveData(userId = "user_live"): DashboardSummaryData {
       userId,
       status: "connected" as const,
     })),
+    transactionBudgetOverrides: [],
   };
 }
 
@@ -186,6 +187,7 @@ function emptyData(userId = "user_empty"): DashboardSummaryData {
     budgetPeriods: [],
     categories: [],
     bankConnections: [],
+    transactionBudgetOverrides: [],
   };
 }
 
@@ -331,16 +333,72 @@ describe("dashboard summary", () => {
     expect(model.kind).toBe("ready");
     if (model.kind !== "ready") return;
     expect(model.summary.safeToSpendEligibleCash).toBe(500);
-    expect(model.summary.safeToSpend).toBe(500);
+    expect(model.summary.safeToSpend).toBe(450);
     expect(model.summary.currentCash).toBe(1500);
     expect(model.financeV2.overdraft?.currentOverdraftUsed).toBe(200);
     expect(model.financeV2.debtFreedom.totalDebt).toBe(500);
     expect(model.financeV2.creditCardFunding[0]).toMatchObject({
       liabilityAccountId: "acct_amex",
       balance: 300,
+      balanceKnown: true,
       reservedBalance: 250,
       fundedBalance: 250,
       unfundedBalance: 50,
+    });
+    expect(model.summary.safeToSpend).toBe(450);
+  });
+
+  it("warns when Amex card balance is unavailable instead of treating it as zero", () => {
+    const data = emptyData("user_amex_unknown");
+    data.profile = { ...data.profile, minimumBuffer: 0 };
+    data.accounts = [
+      {
+        ...mockAccounts[0],
+        id: "acct_spend",
+        userId: data.userId,
+        institutionName: "Revolut",
+        name: "Spending",
+        type: "current_account",
+        subtype: "current",
+        balance: 500,
+        availableBalance: 500,
+        includeInSafeToSpend: true,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        status: "active",
+      },
+      {
+        ...mockAccounts[0],
+        id: "acct_amex_unknown",
+        userId: data.userId,
+        institutionName: "American Express",
+        name: "Amex Platinum Cashback Credit Card",
+        type: "credit_card",
+        subtype: "credit_card",
+        purpose: "credit_card",
+        balance: 0,
+        balanceAvailable: false,
+        balanceUnavailableReason: "provider_balance_unavailable",
+        includeInSafeToSpend: false,
+        includeInCashflow: true,
+        includeInNetWorth: true,
+        status: "active",
+      },
+    ];
+
+    const model = buildFirebaseDashboardModel(data, "2026-07-01");
+
+    expect(model.kind).toBe("ready");
+    if (model.kind !== "ready") return;
+    expect(model.financeV2.creditCardFunding[0]).toMatchObject({
+      liabilityAccountId: "acct_amex_unknown",
+      balanceKnown: false,
+      balance: 0,
+    });
+    expect(model.warnings.join(" ")).toContain("balance unavailable from provider");
+    expect(model.diagnostics.creditCardLiabilities[0]).toMatchObject({
+      balanceKnown: false,
+      warning: "Balance unavailable from provider",
     });
   });
 
@@ -374,6 +432,7 @@ describe("dashboard summary", () => {
       budgetPeriods: [],
       categories: [],
       bankConnections: [],
+      transactionBudgetOverrides: [],
     };
     const db = {
       collection(path: string) {

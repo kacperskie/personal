@@ -35,6 +35,14 @@ const notificationTypeLabels: Record<NotificationPreference["type"], string> = {
   payday_planning: "Payday planning",
   manual_item_review: "Manual item review",
   safe_to_spend_change: "Safe-to-spend change",
+  weekly_spending_summary: "Weekly spending summary",
+  monthly_spending_summary: "Monthly spending summary",
+  category_overspend: "Category overspend",
+  safe_to_spend_drop: "Safe-to-spend drop",
+  bills_account_shortfall: "Bills account shortfall",
+  overdraft_risk: "Overdraft risk",
+  overdraft_repayment_reminder: "Overdraft repayment reminder",
+  amex_pocket_underfunded: "Amex pocket underfunded",
 };
 
 function hasChannel(preference: NotificationPreference, channel: NotificationChannel) {

@@ -166,6 +166,47 @@ describe("cards are off by default and optional", () => {
     expect(calledUrls.some((u) => u.includes("/data/v1/cards"))).toBe(true);
   });
 
+  it("fetches card balances from /data/v1/cards/{card_id}/balance", async () => {
+    installFetch(okHandler);
+    const provider = new TrueLayerProvider(cardsEnabledConfig);
+    const accounts = await provider.getAccounts("conn_tl", context);
+
+    expect(calledUrls.some((u) => u.includes("/data/v1/cards/card_1/balance"))).toBe(true);
+    expect(accounts.find((item) => item.providerAccountId === "card_1")).toMatchObject({
+      type: "credit_card",
+      balanceAvailable: true,
+      balanceDiagnostics: expect.objectContaining({
+        endpointCalled: true,
+        mappedAsLiability: true,
+      }),
+    });
+  });
+
+  it("does not default a missing card balance to a trusted zero", async () => {
+    installFetch((url) => {
+      if (url.includes("/data/v1/cards/card_1/balance")) {
+        return { status: 403, body: { error: "access_denied" } };
+      }
+      return okHandler(url);
+    });
+    const provider = new TrueLayerProvider(cardsEnabledConfig);
+    const accounts = await provider.getAccounts("conn_tl", context);
+    const card = accounts.find((item) => item.providerAccountId === "card_1");
+
+    expect(card).toMatchObject({
+      type: "credit_card",
+      balance: 0,
+      balanceAvailable: false,
+      balanceUnavailableReason: "provider_balance_unavailable",
+      balanceDiagnostics: expect.objectContaining({
+        endpointCalled: true,
+        status: 403,
+        currentBalancePresent: false,
+        mappedAsLiability: false,
+      }),
+    });
+  });
+
   it("a cards 403 is non-blocking: core sync still succeeds when cards are enabled", async () => {
     installFetch((url) =>
       url.includes("/data/v1/cards")

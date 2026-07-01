@@ -28,6 +28,9 @@ export type ProviderAccountPayload = {
   subtype?: string;
   accountType?: string;
   balance?: number | { amount?: number | { value?: number; currency?: string }; value?: number };
+  balanceAvailable?: boolean;
+  balanceUnavailableReason?: string | null;
+  balanceDiagnostics?: Account["balanceDiagnostics"];
   currentBalance?: number;
   availableBalance?: number;
   creditLimit?: number | null;
@@ -201,6 +204,10 @@ function normalizeBalanceForAccountType(type: AccountType, balance: number) {
   return balance;
 }
 
+function valuePresent(value: unknown) {
+  return value !== undefined && value !== null;
+}
+
 function normalizeProviderTransactionStatus(
   payload: ProviderTransactionPayload,
 ): NonNullable<ProviderTransaction["providerStatus"]> {
@@ -243,6 +250,10 @@ export function mapProviderAccountPayload(
     .join(" ");
   const accountType = mapAccountType(descriptor);
   const accountSubtype = mapAccountSubtype(accountType, descriptor);
+  const hasBalance =
+    payload.balanceAvailable ??
+    valuePresent(payload.balance) ??
+    valuePresent(payload.currentBalance);
   const rawBalance = numericValue(payload.balance ?? payload.currentBalance ?? 0);
 
   return {
@@ -266,6 +277,11 @@ export function mapProviderAccountPayload(
     type: accountType,
     subtype: accountSubtype,
     balance: normalizeBalanceForAccountType(accountType, rawBalance),
+    balanceAvailable: hasBalance,
+    balanceUnavailableReason: hasBalance
+      ? null
+      : payload.balanceUnavailableReason ?? "provider_balance_unavailable",
+    balanceDiagnostics: payload.balanceDiagnostics ?? null,
     availableBalance:
       payload.availableBalance === undefined ? null : Number(payload.availableBalance),
     creditLimit: payload.creditLimit ?? payload.details?.creditLimit ?? null,
@@ -339,6 +355,9 @@ export function providerAccountToAccount(
     subtype: account.subtype,
     currency: account.currency,
     balance: account.balance,
+    balanceAvailable: account.balanceAvailable ?? true,
+    balanceUnavailableReason: account.balanceUnavailableReason ?? null,
+    balanceDiagnostics: account.balanceDiagnostics ?? null,
     availableBalance: account.availableBalance,
     creditLimit: account.creditLimit,
     mask: account.mask,

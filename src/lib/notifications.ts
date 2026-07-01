@@ -6,6 +6,7 @@ import type {
   NotificationPreference,
   NotificationSeverity,
   NotificationType,
+  Transaction,
 } from "@/lib/domain";
 import type { BudgetHealthItem } from "@/lib/finance";
 import { getConnectionLifecycleStatus } from "@/lib/finance";
@@ -39,6 +40,14 @@ export const notificationTypes: NotificationType[] = [
   "payday_planning",
   "manual_item_review",
   "safe_to_spend_change",
+  "weekly_spending_summary",
+  "monthly_spending_summary",
+  "category_overspend",
+  "safe_to_spend_drop",
+  "bills_account_shortfall",
+  "overdraft_risk",
+  "overdraft_repayment_reminder",
+  "amex_pocket_underfunded",
 ];
 
 export const defaultNotificationSettings = {
@@ -48,6 +57,17 @@ export const defaultNotificationSettings = {
   quietHoursStart: "22:00",
   quietHoursEnd: "07:00",
 };
+
+const disabledByDefaultNotificationTypes = new Set<NotificationType>([
+  "weekly_spending_summary",
+  "monthly_spending_summary",
+  "category_overspend",
+  "safe_to_spend_drop",
+  "bills_account_shortfall",
+  "overdraft_risk",
+  "overdraft_repayment_reminder",
+  "amex_pocket_underfunded",
+]);
 
 const privacyCopy: Record<NotificationType, { title: string; body: string }> = {
   low_balance: {
@@ -158,6 +178,38 @@ const privacyCopy: Record<NotificationType, { title: string; body: string }> = {
     title: "Safe-to-spend changed",
     body: "Your available spending position has changed.",
   },
+  weekly_spending_summary: {
+    title: "Weekly spending summary",
+    body: "Your weekly finance summary is ready.",
+  },
+  monthly_spending_summary: {
+    title: "Monthly spending summary",
+    body: "Your monthly finance summary is ready.",
+  },
+  category_overspend: {
+    title: "Budget warning",
+    body: "A category needs attention.",
+  },
+  safe_to_spend_drop: {
+    title: "Safe-to-spend changed",
+    body: "Your available spending position needs attention.",
+  },
+  bills_account_shortfall: {
+    title: "Bills account needs attention",
+    body: "Projected commitments may need review.",
+  },
+  overdraft_risk: {
+    title: "Overdraft needs attention",
+    body: "Your overdraft position may need review.",
+  },
+  overdraft_repayment_reminder: {
+    title: "Overdraft repayment reminder",
+    body: "A planned repayment may need review.",
+  },
+  amex_pocket_underfunded: {
+    title: "Card reserve needs attention",
+    body: "Reserved card funding may need review.",
+  },
 };
 
 export function createDefaultNotificationPreferences(
@@ -168,11 +220,19 @@ export function createDefaultNotificationPreferences(
     id: `pref_${type}`,
     userId,
     type,
-    enabled: true,
+    enabled: !disabledByDefaultNotificationTypes.has(type),
     channels: ["in_app"],
     lowBalanceThreshold: defaultNotificationSettings.lowBalanceThreshold,
     budgetWarningPercentage: defaultNotificationSettings.budgetWarningPercentage,
     billReminderDays: defaultNotificationSettings.billReminderDays,
+    weeklySummaryDay: 1,
+    excludedCategories: [],
+    excludedAccounts: [],
+    largeTransactionThreshold: type === "large_transaction" ? 250 : null,
+    unusualSpendingSensitivity: "medium",
+    notifyWhenAmexPocketUnderfunded: true,
+    notifyWhenBillsAccountShortfallExists: true,
+    notifyWhenOverdraftPositionWorsens: true,
     quietHoursStart: defaultNotificationSettings.quietHoursStart,
     quietHoursEnd: defaultNotificationSettings.quietHoursEnd,
     createdAt: now,
@@ -273,6 +333,13 @@ export type NotificationGenerationInput = {
   budgetHealth: BudgetHealthItem[];
   bankConnections: BankConnection[];
   manualFinanceItems: ManualFinanceItem[];
+  transactions?: Transaction[];
+  weeklySpendingTotal?: number;
+  monthlySpendingTotal?: number;
+  billsAccountShortfall?: number;
+  overdraftUsed?: number;
+  overdraftWorsened?: boolean;
+  amexUnfundedAmount?: number | null;
 };
 
 export function generateFinanceNotifications(
@@ -437,6 +504,137 @@ export function generateFinanceNotifications(
         }),
       );
     }
+  }
+
+  if (
+    isNotificationTypeEnabled(input.preferences, "safe_to_spend_drop") &&
+    input.previousSafeToSpend !== undefined &&
+    input.safeToSpend < input.previousSafeToSpend - 100
+  ) {
+    notifications.push(
+      createNotificationDraft({
+        userId: input.userId,
+        type: "safe_to_spend_drop",
+        severity: input.safeToSpend < 0 ? "urgent" : "warning",
+        title: "Safe-to-spend dropped",
+        body: `Safe-to-spend has dropped to ${formatCurrency(input.safeToSpend)}.`,
+        actionHref: "/",
+        entityType: "dashboard",
+        entityId: null,
+        now,
+      }),
+    );
+  }
+
+  if (isNotificationTypeEnabled(input.preferences, "weekly_spending_summary")) {
+    notifications.push(
+      createNotificationDraft({
+        userId: input.userId,
+        type: "weekly_spending_summary",
+        severity: "info",
+        title: "Weekly spending summary",
+        body: `Tracked weekly spending is ${formatCurrency(input.weeklySpendingTotal ?? 0)}.`,
+        actionHref: "/transactions",
+        entityType: "dashboard",
+        entityId: "weekly_spending",
+        now,
+      }),
+    );
+  }
+
+  if (isNotificationTypeEnabled(input.preferences, "monthly_spending_summary")) {
+    notifications.push(
+      createNotificationDraft({
+        userId: input.userId,
+        type: "monthly_spending_summary",
+        severity: "info",
+        title: "Monthly spending summary",
+        body: `Tracked monthly spending is ${formatCurrency(input.monthlySpendingTotal ?? 0)}.`,
+        actionHref: "/transactions",
+        entityType: "dashboard",
+        entityId: "monthly_spending",
+        now,
+      }),
+    );
+  }
+
+  if (isNotificationTypeEnabled(input.preferences, "category_overspend")) {
+    input.budgetHealth
+      .filter((budget) => budget.usagePercentage >= 1)
+      .forEach((budget) => {
+        notifications.push(
+          createNotificationDraft({
+            userId: input.userId,
+            type: "category_overspend",
+            severity: "urgent",
+            title: `${budget.category} is over budget`,
+            body: `${budget.category} is over budget by ${formatCurrency(Math.abs(budget.remaining))}.`,
+            actionHref: "/budgets",
+            entityType: "budget_category",
+            entityId: budget.categoryId,
+            now,
+          }),
+        );
+      });
+  }
+
+  if (
+    isNotificationTypeEnabled(input.preferences, "bills_account_shortfall") &&
+    (input.billsAccountShortfall ?? 0) > 0
+  ) {
+    notifications.push(
+      createNotificationDraft({
+        userId: input.userId,
+        type: "bills_account_shortfall",
+        severity: "urgent",
+        title: "Bills account shortfall",
+        body: `Known bills exceed the bills account by ${formatCurrency(input.billsAccountShortfall ?? 0)}.`,
+        actionHref: "/",
+        entityType: "dashboard",
+        entityId: "bills_account",
+        now,
+      }),
+    );
+  }
+
+  if (
+    isNotificationTypeEnabled(input.preferences, "overdraft_risk") &&
+    (input.overdraftUsed ?? 0) > 0 &&
+    input.overdraftWorsened
+  ) {
+    notifications.push(
+      createNotificationDraft({
+        userId: input.userId,
+        type: "overdraft_risk",
+        severity: "warning",
+        title: "Overdraft position needs review",
+        body: `Overdraft used is ${formatCurrency(input.overdraftUsed ?? 0)}.`,
+        actionHref: "/",
+        entityType: "dashboard",
+        entityId: "overdraft",
+        now,
+      }),
+    );
+  }
+
+  if (
+    isNotificationTypeEnabled(input.preferences, "amex_pocket_underfunded") &&
+    input.amexUnfundedAmount !== null &&
+    (input.amexUnfundedAmount ?? 0) > 0
+  ) {
+    notifications.push(
+      createNotificationDraft({
+        userId: input.userId,
+        type: "amex_pocket_underfunded",
+        severity: "warning",
+        title: "Amex pocket is underfunded",
+        body: `The linked card reserve is short by ${formatCurrency(input.amexUnfundedAmount ?? 0)}.`,
+        actionHref: "/",
+        entityType: "dashboard",
+        entityId: "amex_funding",
+        now,
+      }),
+    );
   }
 
   return notifications;

@@ -27,6 +27,7 @@ import type {
   SpendingAnomaly,
   Subscription,
   Transaction,
+  TransactionBudgetOverride,
   TransactionEnrichment,
   UserProfile,
 } from "@/lib/domain";
@@ -62,6 +63,7 @@ export type FirebaseCollectionName =
   | "spendingAnomalies"
   | "subscriptions"
   | "transactionEnrichments"
+  | "transactionBudgetOverrides"
   | "transactions";
 
 type CollectionTypeMap = {
@@ -91,6 +93,7 @@ type CollectionTypeMap = {
   spendingAnomalies: SpendingAnomaly;
   subscriptions: Subscription;
   transactionEnrichments: TransactionEnrichment;
+  transactionBudgetOverrides: TransactionBudgetOverride;
   transactions: Transaction;
 };
 
